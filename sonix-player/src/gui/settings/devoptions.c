@@ -9,10 +9,12 @@
 #include "src/gui/shell/theme.h"
 #include "src/system/bluetooth/btlog.h"
 #include "src/system/device/adb.h"
+#include "src/system/device/system.h"
 #include "src/system/core/lang.h"
 #include "src/system/library/library.h"
 #include "src/system/core/logging.h"
 #include "src/system/core/config.h"
+#include "src/system/terminal/terminal.h"
 
 lv_obj_t *devoptions_screen;
 
@@ -24,7 +26,11 @@ static lv_obj_t *log_path_label;
 static lv_obj_t *bt_log_switch;
 static lv_obj_t *bt_log_name_label;
 static lv_obj_t *bt_log_path_label;
+static lv_obj_t *terminal_switch;
+static lv_obj_t *terminal_name_label;
+static lv_obj_t *terminal_path_label;
 static lv_timer_t *adb_poll_timer;
+static gui_config_t *g_cfg;
 
 // Turning ADB on or off happens on its own thread and takes a second or two:
 // adbd has to appear, or be waited out and then insisted upon. The switch
@@ -97,6 +103,19 @@ static void update_log_row(void) {
 	show_path(log_switch, log_name_label, log_path_label, on, on ? logging_path() : "");
 }
 
+// Where the programs go, shown while the folder is on and there is a card to
+// hold it. Without one the switch still shows what was asked for -- the folder
+// is made the next time the Terminal is opened with a card in -- but there is
+// no folder to name.
+static void update_terminal_row(void) {
+	const char *path = terminal_tools_path(g_cfg ? g_cfg->sd_root_path : NULL);
+	bool on = terminal_tools_enabled();
+	show_path(terminal_switch, terminal_name_label, terminal_path_label, on && path[0] && storage_card_attached(), path);
+	if (on) {
+		lv_obj_add_state(terminal_switch, LV_STATE_CHECKED);
+	}
+}
+
 static void update_bt_log_row(void) {
 	bool on = btlog_enabled();
 	show_path(bt_log_switch, bt_log_name_label, bt_log_path_label, on, on ? btlog_path() : "");
@@ -145,6 +164,12 @@ static void bt_log_toggled_cb(lv_event_t *e) {
 	update_bt_log_row();
 }
 
+static void terminal_toggled_cb(lv_event_t *e) {
+	(void)e;
+	terminal_tools_set_enabled(lv_obj_has_state(terminal_switch, LV_STATE_CHECKED), g_cfg->sd_root_path);
+	update_terminal_row();
+}
+
 static void db_log_toggled_cb(lv_event_t *e) {
 	(void)e;
 	library_set_log_database(lv_obj_has_state(db_log_switch, LV_STATE_CHECKED));
@@ -160,6 +185,7 @@ static void screen_loaded_cb(lv_event_t *e) {
 	update_adb_row();
 	update_log_row();
 	update_bt_log_row(); // the card may have come or gone since
+	update_terminal_row();
 	lv_timer_resume(adb_poll_timer);
 }
 
@@ -169,6 +195,7 @@ static void screen_unloaded_cb(lv_event_t *e) {
 }
 
 void devoptions_init(gui_config_t *cfg) {
+	g_cfg = cfg;
 	lv_obj_t *container = settingsrow_page(devoptions_screen, cfg, "developer_options");
 
 	settingsrow_toggle(container, "devoptions_adb", &adb_switch, adb_toggled_cb);
@@ -193,6 +220,14 @@ void devoptions_init(gui_config_t *cfg) {
 	bt_log_path_label = add_path_label(bt_card);
 	add_note(container, "devoptions_bluetooth_log_note");
 
+	// The Terminal app's folder on the card, for programs the read-only root
+	// filesystem cannot take. Made when this goes on; see system/terminal.
+	lv_obj_t *terminal_card =
+		settingsrow_toggle(container, "devoptions_terminal_binaries", &terminal_switch, terminal_toggled_cb);
+	terminal_name_label = lv_obj_get_child(terminal_card, 0);
+	terminal_path_label = add_path_label(terminal_card);
+	add_note(container, "devoptions_terminal_binaries_note");
+
 	// Opens the page showing RAM and running processes. A navigation row with a
 	// chevron, like the developer options entry on the previous page.
 	settingsrow_add(container, "processes", NULL, switch_screen_cb, processespage_screen);
@@ -200,6 +235,7 @@ void devoptions_init(gui_config_t *cfg) {
 	update_adb_row();
 	update_log_row();
 	update_bt_log_row();
+	update_terminal_row();
 
 	adb_poll_timer = lv_timer_create(adb_poll_cb, ADB_POLL_MS, NULL);
 	lv_timer_pause(adb_poll_timer);

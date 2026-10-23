@@ -150,6 +150,9 @@ This is everything Sonix Player can do today, on both the **R1** and the **R3 Pr
 - **Game Boy** (Gearboy) - plays Game Boy and Game Boy Color games, with their real names, save states, five palettes, shaders and color correction.
   > ROMs go in `Games/GB` and `Games/GBC`. The boot ROMs (optional) go in `Games/Bios`: `dmg_boot.bin` and `cgb_boot.bin`.
 - **Flappy Bird**, with sounds.
+- **Calculator** - the four operations, percent and sign, with the usual order of operations and the sum shown above the answer. The pill in the corner switches on the scientific keys: brackets, memory, powers and roots, logarithms, trigonometry in degrees or radians (with a 2nd key for the inverses), factorial, pi, e, EE and a random number.
+- **Terminal** - a shell on the player, typed into with the keyboard chosen in Settings, in the monospaced DejaVu Sans Mono (a `Terminal/font.ttf` on the card replaces it). Output is in colour and follows cursor movement, so fastfetch lays out like it does on a computer. `A-` and `A+` in the corner change the text size (down to 8 px), the button beside them sets how many columns wide the screen is (Fit, or 80 to 200, scrolling sideways), and `^C` interrupts (twice ends the shell).
+  > Programs for it go in `Terminal/bin` on the card, made by Developer options > Terminal binaries. They have to be built for 32-bit MIPS, static or against glibc 2.22.
 
 ## Wireless
 
@@ -204,4 +207,4 @@ This is everything Sonix Player can do today, on both the **R1** and the **R3 Pr
 - **Firmware update** - over the internet with the full list of changes, or from a `.upt` file on the card.
 - **About** - device, serial number, card space and version.
 - **Factory reset** - settings, Wi-Fi networks and Bluetooth devices are erased. The music on the card is not touched.
-- **Developer options** - tap "Build number" five times in About: ADB, log to the microSD, database log, Bluetooth log, and running processes and memory.
+- **Developer options** - tap "Build number" five times in About: ADB, log to the microSD, database log, Bluetooth log, Terminal binaries, and running processes and memory.

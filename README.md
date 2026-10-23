@@ -482,8 +482,9 @@ sonix-player/
 ├── sonix-player/                    
 │   ├── assets/                      
 │   │   ├── gui/                     some of the .png assets the UI loads at runtime - the rest are inside the binary.
-│   │   ├── fonts/                   the faces: default, bold, Japanese, Korean (Hangul from Pretendard, OFL), Thai, Arabic
-│   │   └── icons/                   237 SVGs and PNGs, baked into src/gui/shell/icons.c
+│   │   ├── fonts/                   the faces: default, bold, Japanese, Korean (Hangul from Pretendard, OFL), Thai, Arabic,
+│   │   │                            and mono.ttf, DejaVu Sans Mono (free licence, see mono-license.txt), for the Terminal
+│   │   └── icons/                   238 SVGs and PNGs, baked into src/gui/shell/icons.c
 │   │   
 │   │
 │   ├── launcher/                    sonix_launch.c: runs the player, reboots when it exits
@@ -500,6 +501,7 @@ sonix-player/
 │   │   ├── gui/                     
 │   │   │   ├── audio/               EQ, PEQ, AutoEq, MSEB, the DAC page and the metronome
 │   │   │   ├── bluetooth/           pairing, codec, AirPods, receiver mode
+│   │   │   ├── calculator/          the Calculator page in More
 │   │   │   ├── ebook/               EPUB reader: pages, shelf, bar, bookmarks, themes
 │   │   │   ├── flappybird/          the game and its sounds
 │   │   │   ├── fonts/               the lv_font_t objects FreeType fills in at startup
@@ -512,11 +514,13 @@ sonix-player/
 │   │   │   ├── shell/               28 files: theme, screen switcher, status bar, control centre,
 │   │   │   │                        keyboard, popups, toasts, settings rows, first start, icons.c
 │   │   │   ├── streaming/           Tidal, Qobuz, podcast and radio pages, OPML import
+│   │   │   ├── terminal/            the Terminal page in More
 │   │   │   └── wireless/            Wi-Fi, file transfer, AirPlay, DLNA, SonixLink
 │   │   │
 │   │   ├── system/                  
 │   │   │   ├── audio/               ALSA, volume, filter chain, USB audio, headset
 │   │   │   ├── bluetooth/           the whole stack, run by the player and not by the firmware
+│   │   │   ├── calc/                the Calculator's arithmetic: the expression evaluator, functions, number formatting
 │   │   │   ├── core/                config, language, logging, paths, utils
 │   │   │   ├── db/                  SQLite
 │   │   │   ├── decode/              one file per format, plus the dispatcher and CUE handling
@@ -532,7 +536,8 @@ sonix-player/
 │   │   │   ├── net/                 HTTP, TLS, HLS, mDNS, transfer page
 │   │   │   ├── playback/            queue, play history, device state, audiobooks, sleep timers
 │   │   │   ├── remote/              AirPlay, DLNA, SonixLink
-│   │   │   └── streaming/           Tidal, Qobuz, radio and podcast clients, downloads, OPML, caches
+│   │   │   ├── streaming/           Tidal, Qobuz, radio and podcast clients, downloads, OPML, caches
+│   │   │   └── terminal/            the shell behind the Terminal page, and the Terminal folder on the card
 │   │   │
 │   │   └── main.c                   entry point: display, input, and the startup order
 │   │
