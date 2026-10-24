@@ -1,0 +1,192 @@
+name: Release firmware
+
+# Builds Sonix Player for the MIPS target, packs it into the firmware image of
+# each player, and publishes the two images as a GitHub release:
+#
+#   r3proii.upt   HiBy R3 Pro II
+#   r1.upt        HiBy R1
+#
+# Pushing a tag such as v1.2.3 does all of it. The file names are the ones the
+# player's own "Update firmware > Via internet" looks for in the latest release,
+# so they must not change; and the tag has to read as a version (a leading v is
+# fine), because that is what the player compares with the one it runs.
+#
+# Run by hand (Actions > Release firmware > Run workflow) it builds and keeps
+# the images as a workflow artifact; tick "release" and give a tag to publish
+# them as well.
+#
+# Secrets (Settings > Secrets and variables > Actions):
+#
+#   STOCK_R3PII_UPT_URL   where to download HiBy's stock firmware of the R3 Pro II
+#   STOCK_R1_UPT_URL      the same for the R1
+#       The packer rebuilds the stock image, which is HiBy's and is not in the
+#       repository, so the workflow fetches it. Use a direct link to the .upt.
+#   STOCK_R3PII_UPT_SHA256, STOCK_R1_UPT_SHA256   (optional)
+#       The checksum to hold the download to.
+#   STREAMING_KEYS_INI    (optional) the contents of streaming-keys.ini
+#   STREAMING_KEYS_KEY    (optional) the 64 hex characters of streaming-keys.key
+#       Without them the images are built with no Tidal, Qobuz, podcast or
+#       Last.fm keys: everything else works.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a release as well as keeping the images"
+        type: boolean
+        default: false
+      tag:
+        description: "Tag for the release (needed when releasing), e.g. v1.2.3"
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-firmware-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  STOCK_R3PII_UPT_URL: ${{ secrets.STOCK_R3PII_UPT_URL }}
+  STOCK_R1_UPT_URL: ${{ secrets.STOCK_R1_UPT_URL }}
+  STOCK_R3PII_UPT_SHA256: ${{ secrets.STOCK_R3PII_UPT_SHA256 }}
+  STOCK_R1_UPT_SHA256: ${{ secrets.STOCK_R1_UPT_SHA256 }}
+  STREAMING_KEYS_INI: ${{ secrets.STREAMING_KEYS_INI }}
+  STREAMING_KEYS_KEY: ${{ secrets.STREAMING_KEYS_KEY }}
+
+jobs:
+  firmware:
+    runs-on: ubuntu-22.04
+    # The first run compiles a MIPS cross toolchain from source, which takes
+    # well over an hour; later runs restore it from the cache.
+    timeout-minutes: 300
+
+    steps:
+      - name: Work out the tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_RELEASE: ${{ inputs.release }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+            release=true
+          else
+            tag="$INPUT_TAG"
+            release="$INPUT_RELEASE"
+          fi
+          if [ "$release" = "true" ] && [ -z "$tag" ]; then
+            echo "::error::Releasing needs a tag."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - name: Check the secrets this needs
+        run: |
+          missing=0
+          for name in STOCK_R3PII_UPT_URL STOCK_R1_UPT_URL; do
+            if [ -z "${!name}" ]; then
+              echo "::error::The secret $name is not set."
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - uses: actions/checkout@v4
+
+      - name: Install the build and packing tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential git wget curl ca-certificates pkg-config python3 perl \
+            texinfo bison flex patch xz-utils bzip2 unzip autoconf automake libtool \
+            gettext libgmp-dev libmpfr-dev libmpc-dev zlib1g-dev libncurses-dev \
+            p7zip-full squashfs-tools genisoimage
+
+      # The toolchain and the static libraries are the slow part and change only
+      # when the Makefile or the toolchain scripts do.
+      - name: Restore the toolchain and libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            sonix-player/rockbox-toolchain
+            sonix-player/freetype-target
+            sonix-player/audio-target
+            sonix-player/*.tar.gz
+            sonix-player/*.tar.bz2
+            sonix-player/*.tar.xz
+          key: target-libs-${{ runner.os }}-${{ hashFiles('sonix-player/Makefile', 'sonix-player/rockboxdev/**') }}
+
+      - name: Streaming keys
+        if: ${{ env.STREAMING_KEYS_INI != '' && env.STREAMING_KEYS_KEY != '' }}
+        working-directory: sonix-player
+        run: |
+          umask 077
+          printf '%s\n' "$STREAMING_KEYS_INI" > streaming-keys.ini
+          printf '%s\n' "$STREAMING_KEYS_KEY" > streaming-keys.key
+          python3 tools/seal_streamkeys.py seal
+          rm -f streaming-keys.ini
+
+      - name: No streaming keys
+        if: ${{ env.STREAMING_KEYS_INI == '' || env.STREAMING_KEYS_KEY == '' }}
+        run: |
+          echo "::warning::STREAMING_KEYS_INI / STREAMING_KEYS_KEY are not set, so the images have no Tidal, Qobuz, podcast or Last.fm keys."
+
+      - name: Build the player for the target
+        working-directory: sonix-player
+        run: make target -j"$(nproc)"
+
+      - name: Fetch the stock firmware
+        working-directory: sonix-packer
+        run: |
+          fetch() {
+            url="$1"; out="$2"; want="$3"
+            curl --fail --location --retry 3 --silent --show-error -o "$out" "$url"
+            if [ -n "$want" ]; then
+              echo "$want  $out" | sha256sum --check -
+            fi
+          }
+          fetch "$STOCK_R3PII_UPT_URL" r3proii_original.upt "$STOCK_R3PII_UPT_SHA256"
+          fetch "$STOCK_R1_UPT_URL" r1_original.upt "$STOCK_R1_UPT_SHA256"
+
+      - name: Pack the firmware images
+        working-directory: sonix-packer
+        run: |
+          cp ../sonix-player/sonix_player ../sonix-player/sonix_launch .
+          bash ./sonix_firmware_packer.sh
+          for image in r3proii.upt r1.upt; do
+            test -s "$image" || { echo "::error::$image was not built."; exit 1; }
+          done
+          sha256sum r3proii.upt r1.upt | tee SHA256SUMS
+
+      - name: Keep the images
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: |
+            sonix-packer/r3proii.upt
+            sonix-packer/r1.upt
+            sonix-packer/SHA256SUMS
+          if-no-files-found: error
+
+      - name: Publish the release
+        if: ${{ steps.tag.outputs.release == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          cd sonix-packer
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # Re-run for a tag that already has a release: replace its files.
+            gh release upload "$TAG" r3proii.upt r1.upt SHA256SUMS --clobber
+          else
+            gh release create "$TAG" r3proii.upt r1.upt SHA256SUMS \
+              --title "Sonix Player $TAG" \
+              --generate-notes \
+              --target "$GITHUB_SHA"
+          fi
