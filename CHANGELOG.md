@@ -6,7 +6,7 @@ the section for its own tag, so write the section here before pushing the tag
 
 ## v1.0 - 2026-10-24
 
-First release of this fork, on top of Sonix Player 1.3.0.
+My first release of this fork, on top of Sonix Player 1.3.0.
 
 - **Calculator** in More, with a scientific mode.
 - **Terminal** in More: a shell in colour with adjustable text size and width, in

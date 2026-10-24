@@ -5,23 +5,21 @@ LVGL.
 
 Everything it can do is in **[FEATURES.md](FEATURES.md)**.
 
-> **AI disclaimer.** The features this fork adds (the Calculator, the Terminal,
-> the Subsonic client, lyrics on streamed tracks and the release workflow) were
-> written with the help of an AI coding assistant, Claude by Anthropic, under the
-> direction of the maintainer. They build and have been tried in the simulator
-> in part, but they have had far less testing on real players than the rest of
-> Sonix Player. Flashing a firmware image is at your own risk; keep HiBy's
-> original firmware to go back to (see below).
+> **AI disclaimer.** I wrote the features I added to this fork (the Calculator, the
+> Terminal, Subsonic, lyrics on streamed tracks and the release workflow) with the
+> help of an AI coding assistant, Claude by Anthropic. They build, and I have tried
+> some of them in the simulator, but they have had far less testing on real players
+> than the rest of Sonix Player. Flash at your own risk, and keep HiBy's original
+> firmware so you can go back (see below).
 
 ## About this fork
 
-This is a fork of **[Jepl4r/sonix-player](https://github.com/Jepl4r/sonix-player)**,
-which is where Sonix Player comes from and where its history was written; that
-history is kept here as it was. Both are under the GNU General Public License
-version 3 (see [LICENSE](LICENSE)).
+This is my fork of **[Jepl4r/sonix-player](https://github.com/Jepl4r/sonix-player)**.
+Sonix Player is Jepl4r's work, and I have kept their history as it was. Both are
+under the GNU General Public License version 3 (see [LICENSE](LICENSE)).
 
-What this fork adds to it, in the order it arrived. [FEATURES.md](FEATURES.md) has
-the detail, and each release says what changed in it ([CHANGELOG.md](CHANGELOG.md)).
+What I added, in the order I did it ([FEATURES.md](FEATURES.md) has the detail, and
+each release says what changed in it in [CHANGELOG.md](CHANGELOG.md)):
 
 - **Calculator** in More: the four operations, percent and sign, and a scientific
   mode with brackets, memory, powers and roots, logarithms, trigonometry, factorial,
@@ -33,8 +31,8 @@ the detail, and each release says what changed in it ([CHANGELOG.md](CHANGELOG.m
   copied into `Terminal/bin` run from the Terminal and from an ADB shell.
 - **Terminal keys**: a row of keys above the keyboard with Tab completion, command
   history, arrows and the symbols a soft keyboard hides.
-- **Subsonic** under Streaming: your own server (Navidrome, Airsonic, Gonic...) with
-  all your songs kept on the card, so All tracks, Artists, Albums, Genres, Starred
+- **Subsonic** under Streaming: my own server (Navidrome, Airsonic, Gonic...) with
+  all the songs kept on the card, so All tracks, Artists, Albums, Genres, Starred
   and search open at once, with server stars and play reporting.
 - **Lyrics on streamed tracks**, from the lyrics in the file.
 - **Firmware builds on GitHub**: a workflow that builds both images and publishes
