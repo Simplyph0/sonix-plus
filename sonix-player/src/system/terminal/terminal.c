@@ -4,6 +4,7 @@
 
 #include "terminal.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -1130,6 +1131,185 @@ void terminal_run(const char *line, const char *sd_root) {
 		}
 	}
 	pthread_mutex_unlock(&lock);
+}
+
+// ---------------------------------------------------------------------------
+// Completion
+// ---------------------------------------------------------------------------
+
+#define COMPLETE_MAX 64
+
+typedef struct {
+	char name[256];
+	bool is_dir;
+} match_t;
+
+// Adds the entries of `dir` that start with `prefix` to `m`.
+static int collect_matches(const char *dir, const char *prefix, bool dirs_only, bool programs, match_t *m, int count) {
+	DIR *d = opendir(dir);
+	if (!d) {
+		return count;
+	}
+	size_t plen = strlen(prefix);
+	struct dirent *e;
+	while (count < COMPLETE_MAX && (e = readdir(d)) != NULL) {
+		if (strncmp(e->d_name, prefix, plen) != 0 || (plen == 0 && e->d_name[0] == '.')) {
+			continue;
+		}
+		char full[600];
+		snprintf(full, sizeof(full), "%s/%s", dir, e->d_name);
+		struct stat st;
+		if (stat(full, &st) != 0) {
+			continue;
+		}
+		bool is_dir = S_ISDIR(st.st_mode);
+		if (dirs_only && !is_dir) {
+			continue;
+		}
+		if (programs && !is_dir && access(full, X_OK) != 0) {
+			continue;
+		}
+		bool seen = false;
+		for (int i = 0; i < count; i++) {
+			if (!strcmp(m[i].name, e->d_name)) {
+				seen = true;
+			}
+		}
+		if (seen || strlen(e->d_name) >= sizeof(m[0].name)) {
+			continue;
+		}
+		snprintf(m[count].name, sizeof(m[count].name), "%s", e->d_name);
+		m[count].is_dir = is_dir;
+		count++;
+	}
+	closedir(d);
+	return count;
+}
+
+static int match_cmp(const void *a, const void *b) { return strcmp(((const match_t *)a)->name, ((const match_t *)b)->name); }
+
+bool terminal_complete(const char *line, const char *sd_root, char *out, size_t size) {
+	if (!line || !out || size < 2) {
+		return false;
+	}
+	size_t len = strlen(line);
+	size_t start = len;
+	while (start > 0 && line[start - 1] != ' ') {
+		start--;
+	}
+	// The first word is a program when it has no slash in it.
+	bool first = true;
+	for (size_t i = 0; i < start; i++) {
+		if (line[i] != ' ') {
+			first = false;
+		}
+	}
+	const char *word = line + start;
+	const char *slash = strrchr(word, '/');
+	bool programs = first && !slash;
+
+	char dir[600];
+	const char *prefix;
+	if (slash) {
+		size_t dlen = (size_t)(slash - word) + 1;
+		if (dlen >= sizeof(dir)) {
+			return false;
+		}
+		memcpy(dir, word, dlen);
+		dir[dlen] = '\0';
+		prefix = slash + 1;
+	} else {
+		dir[0] = '\0';
+		prefix = word;
+	}
+
+	// A path is looked up from where the shell is, which is not where the
+	// player is: it is asked of /proc.
+	char base[600] = "/";
+	if (dir[0] == '/') {
+		snprintf(base, sizeof(base), "%s", dir);
+	} else {
+		pthread_mutex_lock(&lock);
+		pid_t pid = shell_pid;
+		pthread_mutex_unlock(&lock);
+		char link[64];
+		snprintf(link, sizeof(link), "/proc/%d/cwd", (int)pid);
+		ssize_t n = pid > 0 ? readlink(link, base, sizeof(base) - 2) : -1;
+		if (n <= 0) {
+			snprintf(base, sizeof(base), "%s", "/");
+		} else {
+			base[n] = '\0';
+		}
+		if (dir[0] == '~') {
+			snprintf(base, sizeof(base), "%s%s", sd_root && sd_root[0] ? sd_root : "/", dir[1] == '/' ? dir + 1 : "");
+		} else if (dir[0]) {
+			size_t used = strlen(base);
+			snprintf(base + used, sizeof(base) - used, "/%s", dir);
+		}
+	}
+
+	match_t *m = calloc(COMPLETE_MAX, sizeof(match_t));
+	if (!m) {
+		return false;
+	}
+	int count = 0;
+	if (programs) {
+		const char *tools = terminal_tools_path(sd_root);
+		if (tools[0]) {
+			char bin[600];
+			snprintf(bin, sizeof(bin), "%s/bin", tools);
+			count = collect_matches(bin, prefix, false, true, m, count);
+		}
+		static const char *const path_dirs[] = {"/bin", "/usr/bin", "/sbin", "/usr/sbin", "/usr/local/bin"};
+		for (size_t i = 0; i < sizeof(path_dirs) / sizeof(path_dirs[0]); i++) {
+			count = collect_matches(path_dirs[i], prefix, false, true, m, count);
+		}
+	} else {
+		count = collect_matches(base, prefix, false, false, m, count);
+	}
+	if (count == 0) {
+		free(m);
+		return false;
+	}
+	qsort(m, (size_t)count, sizeof(match_t), match_cmp);
+
+	// The longest start all the matches share.
+	char common[256];
+	snprintf(common, sizeof(common), "%s", m[0].name);
+	for (int i = 1; i < count; i++) {
+		size_t k = 0;
+		while (common[k] && common[k] == m[i].name[k]) {
+			k++;
+		}
+		common[k] = '\0';
+	}
+
+	bool changed = strlen(common) > strlen(prefix);
+	if (count > 1 && !changed) {
+		// Nothing more to add: show what could follow.
+		char list[1024] = "";
+		size_t used = 0;
+		for (int i = 0; i < count && used < sizeof(list) - 270; i++) {
+			used += (size_t)snprintf(list + used, sizeof(list) - used, "%s%s  ", m[i].name, m[i].is_dir ? "/" : "");
+		}
+		pthread_mutex_lock(&lock);
+		write_note(list);
+		write_local("\n");
+		pthread_mutex_unlock(&lock);
+	}
+
+	size_t head = start + (slash ? (size_t)(slash - word) + 1 : 0);
+	char tail = '\0';
+	if (count == 1) {
+		tail = m[0].is_dir ? '/' : ' ';
+	}
+	if (tail) {
+		snprintf(out, size, "%.*s%s%c", (int)head, line, common, tail);
+	} else {
+		snprintf(out, size, "%.*s%s", (int)head, line, common);
+	}
+	free(m);
+	return changed || count == 1;
 }
 
 void terminal_interrupt(void) {

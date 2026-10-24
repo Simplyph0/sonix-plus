@@ -60,6 +60,12 @@ bool terminal_open(const char *sd_root);
 // instead.
 void terminal_run(const char *line, const char *sd_root);
 
+// Tab completion: completes the last word of `line` as a program (the first
+// word, no slash) or as a path from where the shell is. On a unique match, or a
+// longer start the matches share, the whole completed line goes in `out` and
+// true is returned; when several remain they are listed in the output.
+bool terminal_complete(const char *line, const char *sd_root, char *out, size_t size);
+
 // Control-C: interrupts what the shell is running, and leaves the shell be.
 void terminal_interrupt(void);
 

@@ -8,6 +8,7 @@
 #include "lvgl/lvgl.h"
 
 #include "src/gui/fonts/fonts.h"
+#include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
@@ -23,6 +24,10 @@ lv_obj_t *terminalpage_screen;
 #define FIELD_H 62
 #define GAP 10
 #define INTERRUPT_W 72
+#define KEYS_H 40
+#define KEYS_GAP 6
+#define HISTORY_MAX 32
+#define LINE_MAX_CHARS 512
 #define POLL_MS 120
 
 // The page uses nearly the whole width: the box and the input line sit close to
@@ -69,8 +74,16 @@ static lv_obj_t *interrupt_btn;
 static lv_obj_t *smaller_btn;
 static lv_obj_t *larger_btn;
 static lv_obj_t *width_label;
+static lv_obj_t *key_row;
 static keyboard_t *keyboard;
 static lv_timer_t *poll_timer;
+
+// What was typed before, newest last, for the up and down keys. `history_pos`
+// is -1 while a new line is being typed, else the entry on show.
+static char history[HISTORY_MAX][LINE_MAX_CHARS];
+static int history_count;
+static int history_pos = -1;
+static char draft[LINE_MAX_CHARS];
 
 static uint32_t shown_serial;
 static bool follow = true;
@@ -226,8 +239,17 @@ static void layout(void) {
 	lv_obj_set_pos(field, MARGIN, line_y);
 	lv_obj_set_pos(interrupt_btn, screen_w - MARGIN - INTERRUPT_W, line_y);
 
+	// The row of keys the on-screen keyboard has none of sits between the output
+	// and the line, and goes with the keyboard.
+	bool keys = keyboard_is_visible(keyboard);
+	int keys_y = line_y - KEYS_GAP - KEYS_H;
+	lv_obj_set_hidden(key_row, !keys);
+	if (keys) {
+		lv_obj_set_pos(key_row, MARGIN, keys_y);
+	}
+
 	lv_obj_set_pos(out_box, MARGIN, top);
-	lv_obj_set_size(out_box, screen_w - 2 * MARGIN, line_y - GAP - top);
+	lv_obj_set_size(out_box, screen_w - 2 * MARGIN, (keys ? keys_y - KEYS_GAP : line_y - GAP) - top);
 	report_size();
 }
 
@@ -355,8 +377,24 @@ static void output_clicked_cb(lv_event_t *e) {
 	keyboard_show(false); // the lines get the room the keys had
 }
 
+static void history_push(const char *line) {
+	if (!line[0] || strlen(line) >= LINE_MAX_CHARS) {
+		return;
+	}
+	if (history_count > 0 && !strcmp(history[history_count - 1], line)) {
+		return;
+	}
+	if (history_count == HISTORY_MAX) {
+		memmove(history[0], history[1], sizeof(history[0]) * (HISTORY_MAX - 1));
+		history_count--;
+	}
+	snprintf(history[history_count++], LINE_MAX_CHARS, "%s", line);
+}
+
 static void run_cb(lv_event_t *e) {
 	(void)e;
+	history_push(lv_textarea_get_text(field));
+	history_pos = -1;
 	terminal_run(lv_textarea_get_text(field), g_cfg->sd_root_path);
 	lv_textarea_set_text(field, "");
 	follow = true;
@@ -367,6 +405,128 @@ static void interrupt_cb(lv_event_t *e) {
 	(void)e;
 	terminal_interrupt();
 	refresh(true);
+}
+
+// The keys of the row. The shell is fed whole lines, so the arrows work on the
+// line being typed: up and down go through what was run before, left and right
+// move the caret, and Tab completes the last word.
+typedef enum { KEY_TAB, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_TEXT } key_kind_t;
+
+typedef struct {
+	key_kind_t kind;
+	const char *text; // KEY_TEXT: what it types
+} key_def_t;
+
+static void dark_field(lv_obj_t *obj);
+
+static void history_show(int pos) {
+	if (pos < 0) {
+		history_pos = -1;
+		lv_textarea_set_text(field, draft);
+		return;
+	}
+	history_pos = pos;
+	lv_textarea_set_text(field, history[pos]);
+}
+
+static void key_cb(lv_event_t *e) {
+	const key_def_t *key = lv_event_get_user_data(e);
+	switch (key->kind) {
+	case KEY_UP:
+		if (history_count == 0) {
+			break;
+		}
+		if (history_pos < 0) {
+			snprintf(draft, sizeof(draft), "%s", lv_textarea_get_text(field));
+			history_show(history_count - 1);
+		} else if (history_pos > 0) {
+			history_show(history_pos - 1);
+		}
+		break;
+	case KEY_DOWN:
+		if (history_pos >= 0) {
+			history_show(history_pos + 1 < history_count ? history_pos + 1 : -1);
+		}
+		break;
+	case KEY_LEFT:
+		lv_textarea_cursor_left(field);
+		break;
+	case KEY_RIGHT:
+		lv_textarea_cursor_right(field);
+		break;
+	case KEY_TAB: {
+		char completed[LINE_MAX_CHARS];
+		const char *line = lv_textarea_get_text(field);
+		if (terminal_complete(line, g_cfg->sd_root_path, completed, sizeof(completed))) {
+			lv_textarea_set_text(field, completed);
+		}
+		refresh(true);
+		break;
+	}
+	case KEY_TEXT:
+		lv_textarea_add_text(field, key->text);
+		break;
+	}
+}
+
+static void build_key_row(lv_obj_t *parent, int width) {
+	static const key_def_t keys[] = {
+		{KEY_TAB, NULL},   {KEY_UP, NULL},	  {KEY_DOWN, NULL},	 {KEY_LEFT, NULL}, {KEY_RIGHT, NULL},
+		{KEY_TEXT, "|"},   {KEY_TEXT, "/"},	  {KEY_TEXT, "~"},	 {KEY_TEXT, "-"},
+	};
+	const int count = (int)(sizeof(keys) / sizeof(keys[0]));
+
+	key_row = lv_obj_create(parent);
+	lv_obj_remove_style_all(key_row);
+	lv_obj_set_size(key_row, width, KEYS_H);
+	lv_obj_set_scrollable(key_row, false);
+	lv_obj_set_flex_flow(key_row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_style_pad_column(key_row, 4, 0);
+
+	// Tab is a little wider; the others share the rest.
+	int key_w = (width - 4 * (count - 1)) / (count + 1);
+	for (int i = 0; i < count; i++) {
+		lv_obj_t *btn = lv_btn_create(key_row);
+		lv_obj_set_size(btn, keys[i].kind == KEY_TAB ? 2 * key_w : key_w, KEYS_H);
+		lv_obj_add_style(btn, &theme_style_card, 0);
+		dark_field(btn);
+		lv_obj_set_style_radius(btn, 10, 0);
+		lv_obj_set_style_border_width(btn, 0, 0);
+		lv_obj_set_style_shadow_width(btn, 0, 0);
+		lv_obj_set_style_pad_all(btn, 0, 0);
+		lv_obj_add_event_cb(btn, key_cb, LV_EVENT_CLICKED, (void *)&keys[i]);
+
+		const lv_image_dsc_t *arrow = NULL;
+		switch (keys[i].kind) {
+		case KEY_UP:
+			arrow = &icon_chevron_up;
+			break;
+		case KEY_DOWN:
+			arrow = &icon_chevron_down;
+			break;
+		case KEY_LEFT:
+			arrow = &icon_chevron_left;
+			break;
+		case KEY_RIGHT:
+			arrow = &icon_chevron_right;
+			break;
+		default:
+			break;
+		}
+		if (arrow) {
+			lv_obj_t *img = lv_image_create(btn);
+			lv_image_set_src(img, arrow);
+			lv_obj_set_style_image_recolor(img, lv_color_hex(TEXT_COLOR), 0);
+			lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
+			lv_obj_center(img);
+		} else {
+			lv_obj_t *label = lv_label_create(btn);
+			lv_label_set_text(label, keys[i].kind == KEY_TAB ? "Tab" : keys[i].text);
+			lv_obj_set_style_text_color(label, lv_color_hex(TEXT_COLOR), 0);
+			lv_obj_set_style_text_font(label, &font_ui_20, 0);
+			lv_obj_center(label);
+		}
+	}
 }
 
 static void screen_loaded_cb(lv_event_t *e) {
@@ -508,6 +668,8 @@ void terminalpage_init(gui_config_t *cfg) {
 	smaller_btn = corner_button("A-", smaller_x, CORNER_BUTTON, NULL, smaller_cb);
 	corner_button("", width_x, WIDTH_BUTTON_W, &width_label, width_cb);
 	paint_buttons();
+
+	build_key_row(terminalpage_screen, cfg->screen_width - 2 * MARGIN);
 
 	keyboard = keyboard_create(terminalpage_screen, cfg->screen_width, TERM_KEYBOARD_H, field, NULL, "terminal_run", run_cb,
 							   NULL);
