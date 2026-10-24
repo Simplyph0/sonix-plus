@@ -5,6 +5,19 @@ LVGL.
 
 Everything it can do is in **[FEATURES.md](FEATURES.md)**.
 
+## About this fork
+
+This is a fork of **[Jepl4r/sonix-player](https://github.com/Jepl4r/sonix-player)**,
+which is where Sonix Player comes from and where its history was written; that
+history is kept here as it was. Both are under the GNU General Public License
+version 3 (see [LICENSE](LICENSE)).
+
+What this fork adds on top of it: a Subsonic client under Streaming (the whole
+collection on the player, with All tracks, search and server stars), a row of keys
+and Tab completion in the Terminal, lyrics from the file on streamed tracks, and a
+GitHub Actions workflow that builds both firmware images and publishes them as a
+release. See [FEATURES.md](FEATURES.md) for the details.
+
 ## Install
 
 1. Download the firmware for your player from the
