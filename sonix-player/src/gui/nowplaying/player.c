@@ -41,6 +41,7 @@
 #include "src/system/core/lang.h"
 #include "src/system/library/library.h"
 #include "src/system/library/lrclib.h"
+#include "src/system/decode/growfile.h"
 #include "src/system/library/lyrics.h"
 #include "src/system/device/led.h"
 #include "src/system/playback/playlist.h"
@@ -1234,6 +1235,29 @@ static bool playing_local_file(const device_state_t *state) {
 		   !dlna_owns_playback();
 }
 
+// A track of Qobuz, Tidal or Subsonic: not a file of the user's, but a whole
+// file all the same, with the tags it was published with -- the lyrics in them
+// included. Those are the only words it can have: nothing is looked up or
+// written for it, since what is saved beside it goes with the cache.
+static bool playing_streamed_file(const device_state_t *state) {
+	if (state->live || !state->current_file[0] || audiobook_is_playing()) {
+		return false;
+	}
+	airplay_state_t air;
+	airplay_get_state(&air);
+	if (air.playing) {
+		return false;
+	}
+	const char *f = state->current_file;
+	return qobuzcache_owns(f) || tidalcache_owns(f) || subsoniccache_owns(f);
+}
+
+// Whether the file playing may have words in it to show: a file on the card, or
+// a streamed one.
+static bool playing_lyrics_file(const device_state_t *state) {
+	return playing_local_file(state) || playing_streamed_file(state);
+}
+
 // Puts the progress slider over the waveform, or back where it belongs.
 //
 // The slider is the only thing on the page that knows how to turn a finger into
@@ -1507,6 +1531,18 @@ static void lyrics_arrived(void *user) {
 static void *lyrics_worker(void *arg) {
 	lyrics_job_t *job = arg;
 	job->found = lyrics_load(job->path, job->title, &job->lyrics);
+	// A track still coming down may not have its tags yet (a big cover ahead of
+	// the lyrics, say): once it is whole, look again. Not for long, and not if
+	// the track has changed meanwhile.
+	if (!job->found && growfile_is_growing(job->path)) {
+		for (int waited = 0; waited < 600 && growfile_is_growing(job->path) && job->generation == lyrics_generation;
+			 waited++) {
+			usleep(200 * 1000);
+		}
+		if (job->generation == lyrics_generation) {
+			job->found = lyrics_load(job->path, job->title, &job->lyrics);
+		}
+	}
 	if (!gui_post(lyrics_arrived, job)) {
 		lyrics_free(&job->lyrics);
 		free(job);
@@ -1514,11 +1550,14 @@ static void *lyrics_worker(void *arg) {
 	return NULL;
 }
 
-// Only a file on the card has words to show.
+// A file on the card has words to show or to look for; a streamed one only
+// when its tags carried some, since there is no looking for them.
+static bool lyrics_has_words(void);
+
 static bool lyrics_available(void) {
 	device_state_t state;
 	device_state_get(&state);
-	return playing_local_file(&state);
+	return playing_local_file(&state) || (playing_streamed_file(&state) && lyrics_has_words());
 }
 
 // The page is up, or on its way in or out under a finger.
@@ -1539,7 +1578,7 @@ static bool lyrics_has_words(void) { return lyrics_loaded && lyrics_cur.count > 
 // starts: the tags of a FLAC are read whole, pictures included, and that is
 // not the interface's to wait for. Asked again only when the file changes.
 static void lyrics_request(const device_state_t *state) {
-	if (!state->current_file[0] || !playing_local_file(state)) {
+	if (!state->current_file[0] || !playing_lyrics_file(state)) {
 		return;
 	}
 	if (strcmp(state->current_file, lyrics_path) == 0) {
@@ -1969,7 +2008,7 @@ static void lyrics_commit(bool on) {
 	lyrics_wanted = on;
 	device_state_t state;
 	device_state_get(&state);
-	lyrics_allowed = on && playing_local_file(&state);
+	lyrics_allowed = on && playing_lyrics_file(&state);
 	lyrics_now = lyrics_allowed && lyrics_has_words();
 	if (lyrics_now) {
 		lyrics_slide_to(LYRICS_FULL);
@@ -3024,7 +3063,7 @@ static void update_layout(const device_state_t *state) {
 	// Studio only wants a picture and a name, and takes whatever is playing:
 	// a file, a cached Qobuz or Tidal track, a podcast, a book, a station.
 	bool local = playing_local_file(state);
-	bool lyrics = lyrics_wanted && local;
+	bool lyrics = lyrics_wanted && playing_lyrics_file(state);
 	bool studio = layout_choice == PLAYER_LAYOUT_STUDIO;
 	bool wave = layout_choice == PLAYER_LAYOUT_ALTERNATIVE && local;
 	bool alt = wave;

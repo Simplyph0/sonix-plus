@@ -105,7 +105,7 @@ This is everything Sonix Player can do today, on both the **R1** and the **R3 Pr
   - **The server's playlists** are listed and played too.
   - **Long press a song** to add it to the queue, play it next, star it, add it to a playlist, or go to its album or artist.
   - **Stars** are the server's: the star in Now Playing and in the Control centre stars the song there, and the stars you gave elsewhere show here. Plays are reported to the server.
-  - **Play** - songs are played as the server has them, never transcoded, and start while they download; the next two are fetched ahead. The sound settings apply as they do to any other track, and the server's ReplayGain tags are used.
+  - **Play** - songs are played as the server has them, never transcoded, and start while they download; the next two are fetched ahead. The sound settings apply as they do to any other track, and the server's ReplayGain tags are used. **Lyrics** embedded in the file show on the lyrics page; nothing is looked up or saved for a streamed song.
   > What you still cannot do from the player: edit server playlists, or select several songs at once.
 - **Radio** - thousands of stations by country, language or genre, plus search, favourites and recently played. MP3, AAC and FLAC stations.
   > **My stations** - write your own list in a `radio.txt` file in the root of the card, one station per line: `name, address`.
