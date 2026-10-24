@@ -40,6 +40,39 @@ the detail, and each release says what changed in it ([CHANGELOG.md](CHANGELOG.m
 - **Firmware builds on GitHub**: a workflow that builds both images and publishes
   them as a release.
 
+## Your own programs on the card
+
+The player's own filesystem is read-only, so programs you want to run in the
+Terminal (or in an ADB shell) live on the microSD card instead.
+
+1. On the player, tap "Build number" five times in Settings > System > About to
+   open Developer options, and switch on **Terminal binaries**.
+2. That makes a `Terminal` folder on the card:
+
+   ```
+   Terminal/
+   ├── bin/        copy programs here
+   ├── lib/        shared libraries those programs need
+   └── font.ttf    optional: a monospaced typeface for the Terminal
+   ```
+
+3. Copy a program into `bin`. It is first on the Terminal's PATH, so a file called
+   `fastfetch` in `bin` starts when you type `fastfetch`. The same folders are put
+   on the PATH of `adb shell`, so the programs run from there too.
+
+A program has to be built for the player: **32-bit little-endian MIPS (mipsel,
+MIPS32r2)**, either linked statically or against **glibc 2.22 or older**. Anything
+else will not start. Static is the easy way, and the MIPS toolchain that
+`make target` builds (`sonix-player/rockbox-toolchain`) makes them:
+
+```bash
+sonix-player/rockbox-toolchain/bin/mipsel-rockbox-linux-gnu-gcc -O2 -march=mips32r2 -static hello.c -o hello
+```
+
+The card is FAT, but it is mounted with the execute bits on, so a copied program
+runs as it is. Programs that draw the whole screen and read single keys (vi, top)
+do not work yet: the Terminal sends a line at a time.
+
 ## Install
 
 1. Download the firmware for your player from the
