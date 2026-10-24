@@ -15,18 +15,34 @@ name: Release firmware
 # the images as a workflow artifact; tick "release" and give a tag to publish
 # them as well.
 #
-# Secrets (Settings > Secrets and variables > Actions):
+# The stock firmware. The packer rebuilds HiBy's own image, which is not in the
+# repository, so the workflow needs both stock files:
 #
-#   STOCK_R3PII_UPT_URL   where to download HiBy's stock firmware of the R3 Pro II
-#   STOCK_R1_UPT_URL      the same for the R1
-#       The packer rebuilds the stock image, which is HiBy's and is not in the
-#       repository, so the workflow fetches it. Use a direct link to the .upt.
-#   STOCK_R3PII_UPT_SHA256, STOCK_R1_UPT_SHA256   (optional)
-#       The checksum to hold the download to.
-#   STREAMING_KEYS_INI    (optional) the contents of streaming-keys.ini
-#   STREAMING_KEYS_KEY    (optional) the 64 hex characters of streaming-keys.key
+#   r3proii_original.upt   HiBy R3 Pro II
+#   r1_original.upt        HiBy R1
+#
+# Upload them once, as files of a release tagged "stock-firmware" in this
+# repository (a draft or pre-release is fine; it is never picked up by the
+# player's updater):
+#
+#   gh release create stock-firmware --prerelease --title "Stock firmware" \
+#       --notes "HiBy's stock images, for the packer" \
+#       r3proii_original.upt r1_original.upt
+#
+# Or, instead, set the secrets STOCK_R3PII_UPT_URL and STOCK_R1_UPT_URL to
+# direct links to the files (and optionally STOCK_R3PII_UPT_SHA256 and
+# STOCK_R1_UPT_SHA256 to hold the downloads to a checksum).
+#
+# Optional secrets, for the streaming services (Settings > Secrets and
+# variables > Actions):
+#
+#   STREAMING_KEYS_INI    the contents of streaming-keys.ini
+#   STREAMING_KEYS_KEY    the 64 hex characters of streaming-keys.key
 #       Without them the images are built with no Tidal, Qobuz, podcast or
 #       Last.fm keys: everything else works.
+#
+# "Build only" compiles the player and stops. It is how to try the workflow, and
+# to fill the toolchain cache, before the stock firmware is in place.
 
 on:
   push:
@@ -42,6 +58,10 @@ on:
         description: "Tag for the release (needed when releasing), e.g. v1.2.3"
         type: string
         default: ""
+      build_only:
+        description: "Build the player only: no stock firmware, no images"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -86,18 +106,35 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "release=$release" >> "$GITHUB_OUTPUT"
 
-      - name: Check the secrets this needs
-        run: |
-          missing=0
-          for name in STOCK_R3PII_UPT_URL STOCK_R1_UPT_URL; do
-            if [ -z "${!name}" ]; then
-              echo "::error::The secret $name is not set."
-              missing=1
-            fi
-          done
-          exit $missing
-
       - uses: actions/checkout@v4
+
+      # Before the long build, so a missing file fails in seconds and not after
+      # an hour.
+      - name: Fetch the stock firmware
+        if: ${{ !inputs.build_only }}
+        working-directory: sonix-packer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          fetch() {
+            file="$1"; url="$2"; want="$3"
+            if gh release download stock-firmware --repo "$GITHUB_REPOSITORY" --pattern "$file" --output "$file" 2>/dev/null; then
+              echo "$file: from the stock-firmware release"
+            elif [ -n "$url" ]; then
+              curl --fail --location --retry 3 --silent --show-error -o "$file" "$url"
+              echo "$file: from the download link"
+            else
+              echo "::error::No $file: upload it to a release tagged stock-firmware, or set the secret with its download link. See the top of this workflow."
+              return 1
+            fi
+            if [ -n "$want" ]; then
+              echo "$want  $file" | sha256sum --check -
+            fi
+          }
+          ok=0
+          fetch r3proii_original.upt "$STOCK_R3PII_UPT_URL" "$STOCK_R3PII_UPT_SHA256" || ok=1
+          fetch r1_original.upt "$STOCK_R1_UPT_URL" "$STOCK_R1_UPT_SHA256" || ok=1
+          exit $ok
 
       - name: Install the build and packing tools
         run: |
@@ -141,20 +178,8 @@ jobs:
         working-directory: sonix-player
         run: make target -j"$(nproc)"
 
-      - name: Fetch the stock firmware
-        working-directory: sonix-packer
-        run: |
-          fetch() {
-            url="$1"; out="$2"; want="$3"
-            curl --fail --location --retry 3 --silent --show-error -o "$out" "$url"
-            if [ -n "$want" ]; then
-              echo "$want  $out" | sha256sum --check -
-            fi
-          }
-          fetch "$STOCK_R3PII_UPT_URL" r3proii_original.upt "$STOCK_R3PII_UPT_SHA256"
-          fetch "$STOCK_R1_UPT_URL" r1_original.upt "$STOCK_R1_UPT_SHA256"
-
       - name: Pack the firmware images
+        if: ${{ !inputs.build_only }}
         working-directory: sonix-packer
         run: |
           cp ../sonix-player/sonix_player ../sonix-player/sonix_launch .
@@ -165,6 +190,7 @@ jobs:
           sha256sum r3proii.upt r1.upt | tee SHA256SUMS
 
       - name: Keep the images
+        if: ${{ !inputs.build_only }}
         uses: actions/upload-artifact@v4
         with:
           name: firmware
@@ -175,7 +201,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish the release
-        if: ${{ steps.tag.outputs.release == 'true' }}
+        if: ${{ steps.tag.outputs.release == 'true' && !inputs.build_only }}
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
