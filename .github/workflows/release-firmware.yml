@@ -107,6 +107,8 @@ jobs:
           echo "release=$release" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the tags, for the changelog
 
       # Before the long build, so a missing file fails in seconds and not after
       # an hour.
@@ -249,6 +251,28 @@ jobs:
             sonix-packer/SHA256SUMS
           if-no-files-found: error
 
+      # The release says what changed: the section of CHANGELOG.md for this tag,
+      # or, if there is none, the commit subjects since the previous tag.
+      - name: Write the release notes
+        if: ${{ steps.tag.outputs.release == 'true' && !inputs.build_only }}
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          notes="$RUNNER_TEMP/notes.md"
+          awk -v tag="$TAG" 'index($0, "## " tag) == 1 { on = 1; next } /^## / { on = 0 } on' CHANGELOG.md \
+            | sed '/./,$!d' > "$notes"
+          if [ ! -s "$notes" ]; then
+            echo "::warning::CHANGELOG.md has no '## $TAG' section, so the notes list the commits instead."
+            prev=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+            { echo "Changes since ${prev:-the start}:"; echo; git log --no-merges --format='- %s' "${prev:+$prev..}$TAG"; } > "$notes"
+          fi
+          {
+            echo
+            echo "**Flashing:** \`r1.upt\` is for the HiBy R1 and \`r3proii.upt\` for the R3 Pro II. Never the other one."
+            echo "Charge the player above 30% first. \`SHA256SUMS\` has the checksums."
+          } >> "$notes"
+          cat "$notes"
+
       - name: Publish the release
         if: ${{ steps.tag.outputs.release == 'true' && !inputs.build_only }}
         env:
@@ -259,9 +283,10 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             # Re-run for a tag that already has a release: replace its files.
             gh release upload "$TAG" r3proii.upt r1.upt SHA256SUMS --clobber
+            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
           else
             gh release create "$TAG" r3proii.upt r1.upt SHA256SUMS \
               --title "Sonix Player $TAG" \
-              --generate-notes \
+              --notes-file "$RUNNER_TEMP/notes.md" \
               --target "$GITHUB_SHA"
           fi

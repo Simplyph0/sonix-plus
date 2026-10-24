@@ -5,6 +5,14 @@ LVGL.
 
 Everything it can do is in **[FEATURES.md](FEATURES.md)**.
 
+> **AI disclaimer.** The features this fork adds (the Calculator, the Terminal,
+> the Subsonic client, lyrics on streamed tracks and the release workflow) were
+> written with the help of an AI coding assistant, Claude by Anthropic, under the
+> direction of the maintainer. They build and have been tried in the simulator
+> in part, but they have had far less testing on real players than the rest of
+> Sonix Player. Flashing a firmware image is at your own risk; keep HiBy's
+> original firmware to go back to (see below).
+
 ## About this fork
 
 This is a fork of **[Jepl4r/sonix-player](https://github.com/Jepl4r/sonix-player)**,
@@ -12,11 +20,25 @@ which is where Sonix Player comes from and where its history was written; that
 history is kept here as it was. Both are under the GNU General Public License
 version 3 (see [LICENSE](LICENSE)).
 
-What this fork adds on top of it: a Subsonic client under Streaming (the whole
-collection on the player, with All tracks, search and server stars), a row of keys
-and Tab completion in the Terminal, lyrics from the file on streamed tracks, and a
-GitHub Actions workflow that builds both firmware images and publishes them as a
-release. See [FEATURES.md](FEATURES.md) for the details.
+What this fork adds to it, in the order it arrived. [FEATURES.md](FEATURES.md) has
+the detail, and each release says what changed in it ([CHANGELOG.md](CHANGELOG.md)).
+
+- **Calculator** in More: the four operations, percent and sign, and a scientific
+  mode with brackets, memory, powers and roots, logarithms, trigonometry, factorial,
+  pi, e and a random number.
+- **Terminal** in More: a shell on the player, in colour, with text size and screen
+  width you can change. It uses DejaVu Sans Mono, and a `Terminal/font.ttf` on the
+  card replaces it.
+- **A Terminal folder on the card** (Developer options > Terminal binaries): programs
+  copied into `Terminal/bin` run from the Terminal and from an ADB shell.
+- **Terminal keys**: a row of keys above the keyboard with Tab completion, command
+  history, arrows and the symbols a soft keyboard hides.
+- **Subsonic** under Streaming: your own server (Navidrome, Airsonic, Gonic...) with
+  all your songs kept on the card, so All tracks, Artists, Albums, Genres, Starred
+  and search open at once, with server stars and play reporting.
+- **Lyrics on streamed tracks**, from the lyrics in the file.
+- **Firmware builds on GitHub**: a workflow that builds both images and publishes
+  them as a release.
 
 ## Install
 
