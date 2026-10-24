@@ -142,7 +142,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential git wget curl ca-certificates pkg-config python3 perl \
             texinfo bison flex patch xz-utils bzip2 unzip autoconf automake libtool libtool-bin gzip \
-            gettext autopoint libgmp-dev libmpfr-dev libmpc-dev zlib1g-dev libncurses-dev \
+            gettext autopoint gtk-doc-tools libgmp-dev libmpfr-dev libmpc-dev zlib1g-dev libncurses-dev \
             p7zip-full squashfs-tools genisoimage
 
       # The toolchain and the static libraries are the slow part and change only
