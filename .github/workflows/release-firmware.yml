@@ -142,12 +142,14 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential git wget curl ca-certificates pkg-config python3 perl \
             texinfo bison flex patch xz-utils bzip2 unzip autoconf automake libtool libtool-bin gzip \
-            gettext libgmp-dev libmpfr-dev libmpc-dev zlib1g-dev libncurses-dev \
+            gettext autopoint libgmp-dev libmpfr-dev libmpc-dev zlib1g-dev libncurses-dev \
             p7zip-full squashfs-tools genisoimage
 
       # The toolchain and the static libraries are the slow part and change only
-      # when the Makefile or the toolchain scripts do.
+      # when the Makefile or the toolchain scripts do. This cache is written only
+      # when the whole job succeeds.
       - name: Restore the toolchain and libraries
+        id: libs
         uses: actions/cache@v4
         with:
           path: |
@@ -158,6 +160,53 @@ jobs:
             sonix-player/*.tar.bz2
             sonix-player/*.tar.xz
           key: target-libs-${{ runner.os }}-${{ hashFiles('sonix-player/Makefile', 'sonix-player/rockboxdev/**') }}
+
+      # The compiler itself takes an hour; the libraries after it take minutes
+      # and are where a missing package shows up. So progress is kept even when
+      # the build fails, and the next run carries on from the libraries instead
+      # of compiling the compiler again.
+      - name: Restore the unfinished toolchain
+        if: ${{ steps.libs.outputs.cache-hit != 'true' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            sonix-player/rockbox-toolchain
+            sonix-player/tmp
+          key: toolchain-partial-${{ runner.os }}-${{ hashFiles('sonix-player/rockboxdev/**') }}-${{ github.run_id }}
+          restore-keys: |
+            toolchain-partial-${{ runner.os }}-${{ hashFiles('sonix-player/rockboxdev/**') }}-
+
+      - name: Build the toolchain
+        id: toolchain
+        if: ${{ steps.libs.outputs.cache-hit != 'true' }}
+        working-directory: sonix-player
+        run: |
+          # The compiler is finished once the C++ runtime of the second stage is
+          # in place; what comes after (alsa-lib and on) can be started over.
+          if [ -x rockbox-toolchain/bin/mipsel-rockbox-linux-gnu-gcc ] && [ -d tmp ] &&
+             find rockbox-toolchain -name 'libstdc++.so*' | grep -q .; then
+            echo "Carrying on from the libraries."
+            RBDEV_RESTART=alsa-lib ./rockboxdev/rockboxdev.sh
+          else
+            ./rockboxdev/rockboxdev.sh
+          fi
+
+      - name: Keep the unfinished toolchain
+        if: ${{ always() && steps.libs.outputs.cache-hit != 'true' && steps.toolchain.outcome != 'skipped' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            sonix-player/rockbox-toolchain
+            sonix-player/tmp
+          key: toolchain-partial-${{ runner.os }}-${{ hashFiles('sonix-player/rockboxdev/**') }}-${{ github.run_id }}
+
+      - name: Keep the toolchain logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-logs
+          path: sonix-player/tmp/rbdev-build/*.log
+          if-no-files-found: ignore
 
       - name: Streaming keys
         if: ${{ env.STREAMING_KEYS_INI != '' && env.STREAMING_KEYS_KEY != '' }}
