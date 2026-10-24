@@ -100,6 +100,8 @@ This is everything Sonix Player can do today, on both the **R1** and the **R3 Pr
 
 - **Tidal** - sign in with the code on screen or the QR code. Low, High, CD and Hi-Res quality. Search, albums, artists, playlists, favourites, new releases, most streamed and recommended. You can add and remove favourites and manage your playlists from the player.
 - **Qobuz** - sign in with your account. MP3 320, FLAC 16/44.1, 24/96 and 24/192. Search, albums, artists, playlists, favourites and new releases. You can add and remove favourites and manage your playlists from the player.
+- **Subsonic** - your own server: Navidrome, Airsonic, Gonic and the others that speak the Subsonic API. Sign in with its address, a user name and a password; only a salted token is kept on the player, never the password. Browse artists, albums (A-Z, recently added, most played, random), playlists and starred tracks, and search. Tracks are played as the server has them, never transcoded, and start while they download.
+  > Reading only: starring, playlists and the play count are not written back to the server.
 - **Radio** - thousands of stations by country, language or genre, plus search, favourites and recently played. MP3, AAC and FLAC stations.
   > **My stations** - write your own list in a `radio.txt` file in the root of the card, one station per line: `name, address`.
 - **Last.fm** - scrobbles what you listen to. Without Wi-Fi the plays are kept and sent the next time the player connects.
@@ -151,7 +153,7 @@ This is everything Sonix Player can do today, on both the **R1** and the **R3 Pr
   > ROMs go in `Games/GB` and `Games/GBC`. The boot ROMs (optional) go in `Games/Bios`: `dmg_boot.bin` and `cgb_boot.bin`.
 - **Flappy Bird**, with sounds.
 - **Calculator** - the four operations, percent and sign, with the usual order of operations and the sum shown above the answer. The pill in the corner switches on the scientific keys: brackets, memory, powers and roots, logarithms, trigonometry in degrees or radians (with a 2nd key for the inverses), factorial, pi, e, EE and a random number.
-- **Terminal** - a shell on the player, typed into with the keyboard chosen in Settings, in the monospaced DejaVu Sans Mono (a `Terminal/font.ttf` on the card replaces it). Output is in colour and follows cursor movement, so fastfetch lays out like it does on a computer. `A-` and `A+` in the corner change the text size (down to 8 px), the button beside them sets how many columns wide the screen is (Fit, or 80 to 200, scrolling sideways), and `^C` interrupts (twice ends the shell).
+- **Terminal** - a shell on the player, typed into with the keyboard chosen in Settings, in the monospaced DejaVu Sans Mono (a `Terminal/font.ttf` on the card replaces it). Output is in colour and follows cursor movement, so fastfetch lays out like it does on a computer. `A-` and `A+` in the corner change the text size (down to 8 px), the button beside them sets how many columns wide the screen is (Fit, or 80 to 200, scrolling sideways), and `^C` interrupts (twice ends the shell). A row of keys above the keyboard adds `Tab` (completes a program name or a path from where the shell is), the up and down arrows (the lines you ran before), the left and right arrows (move within the line) and `|`, `/`, `~` and `-`.
   > Programs for it go in `Terminal/bin` on the card, made by Developer options > Terminal binaries. They have to be built for 32-bit MIPS, static or against glibc 2.22.
 
 ## Wireless
