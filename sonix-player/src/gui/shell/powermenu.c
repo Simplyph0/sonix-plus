@@ -20,6 +20,7 @@
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/subsoniccache.h"
 #include "src/system/remote/dlna.h"
 #include "src/system/streaming/radio.h"
 
@@ -108,6 +109,7 @@ static void do_reboot(void) {
 	radio_store_close();
 	qobuzcache_clear_on_exit();
 	tidalcache_clear_on_exit();
+	subsoniccache_clear_on_exit();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
 	power_screen_off(); // same instant-feedback trick as the shutdown

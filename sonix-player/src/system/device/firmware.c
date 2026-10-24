@@ -15,6 +15,7 @@
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/subsoniccache.h"
 #include "src/system/remote/dlna.h"
 #include "src/system/device/power.h"
 #include "src/system/device/sysinfo.h"
@@ -120,6 +121,7 @@ void firmware_update_start(void) {
 	// update's included.
 	qobuzcache_clear_on_exit();
 	tidalcache_clear_on_exit();
+	subsoniccache_clear_on_exit();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
 

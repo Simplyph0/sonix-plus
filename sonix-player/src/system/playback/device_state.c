@@ -20,6 +20,7 @@
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/radio.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/subsoniccache.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -143,7 +144,7 @@ static bool remember_enabled(void) { return config_get_int("player", "remember_t
 // position, and a streaming cache file will not exist at the next boot.
 static bool remember_worth_saving(const device_state_t *state) {
 	return !state->live && state->current_file[0] && !qobuzcache_owns(state->current_file) &&
-		   !tidalcache_owns(state->current_file);
+		   !tidalcache_owns(state->current_file) && !subsoniccache_owns(state->current_file);
 }
 
 void device_state_remember_restored(const char *path, double position) {
@@ -400,7 +401,7 @@ static void queue_persist(void) {
 		// empty themselves) and the next boot would restore a queue of paths
 		// that no longer exist, mixed in with the user's own tracks. Both
 		// services, for the same reason.
-		if (qobuzcache_owns(path) || tidalcache_owns(path)) {
+		if (qobuzcache_owns(path) || tidalcache_owns(path) || subsoniccache_owns(path)) {
 			from_stream = true;
 			break;
 		}

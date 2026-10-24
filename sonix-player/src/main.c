@@ -53,6 +53,8 @@
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/podcaststate.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/subsoniccache.h"
+#include "src/system/streaming/subsonic.h"
 #include "src/system/streaming/streamkeys.h"
 #include "src/system/lastfm/lastfm.h"
 #include "src/system/library/library.h"
@@ -1959,6 +1961,7 @@ int main(int argc, char **argv) {
 	streamkeys_init();
 	qobuz_init();
 	tidal_init();
+	subsonic_init();
 	lastfm_init();
 
 	lv_init();
@@ -2175,6 +2178,7 @@ int main(int argc, char **argv) {
 	const char *card_root = storage_sd_root();
 	qobuzcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	tidalcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
+	subsoniccache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	podcastcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	podcastsubs_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	podcaststate_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
@@ -2194,6 +2198,7 @@ int main(int argc, char **argv) {
 	// rather than to the local database.
 	library_forget_under(qobuzcache_dir());
 	library_forget_under(tidalcache_dir());
+	library_forget_under(subsoniccache_dir());
 	if (!tls_available()) {
 		fprintf(stderr, "tls: unavailable; https radio stations cannot be opened\n");
 	}
