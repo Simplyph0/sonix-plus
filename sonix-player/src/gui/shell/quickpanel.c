@@ -43,6 +43,8 @@
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/qobuzsync.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/subsoniccache.h"
+#include "src/system/streaming/subsonicdb.h"
 #include "src/system/streaming/tidalsync.h"
 #include "src/system/streaming/radio.h"
 #include "src/system/remote/dlna.h"
@@ -420,6 +422,8 @@ static void refresh_now_playing_card(void) {
 		// Reading the local database here would draw a star that disagrees with
 		// the one a tap fills.
 		fav = qobuzsync_is_favorite(qobuz_id);
+	} else if (state.current_file[0] && subsoniccache_owns(state.current_file)) {
+		fav = sdb_path_starred(state.current_file);
 	} else {
 		fav = state.current_file[0] && library_fav_contains(state.current_file);
 	}
@@ -882,6 +886,12 @@ static void qp_tidal_fav_done(bool ok, const char *error, void *user) {
 	gui_post(qp_fav_error_async, NULL);
 }
 
+static void qp_subsonic_fav_done(bool ok, const char *error, void *user) {
+	(void)user;
+	snprintf(qp_fav_error, sizeof(qp_fav_error), "%s", ok ? "" : (error && error[0] ? error : tr("subsonic_cannot_reach")));
+	gui_post(qp_fav_error_async, NULL);
+}
+
 static void star_cb(lv_event_t *e) {
 	(void)e;
 
@@ -934,6 +944,13 @@ static void star_cb(lv_event_t *e) {
 	if (tidal_id > 0) {
 		bool want = !tidalsync_is_favorite(tidal_id);
 		tidalsync_favorite_toggle(tidal_id, want, qp_tidal_fav_done, NULL);
+		refresh_now_playing_card();
+		player_refresh_now_playing();
+		return;
+	}
+
+	if (subsoniccache_owns(state.current_file)) {
+		sdb_path_toggle_star(state.current_file, qp_subsonic_fav_done, NULL);
 		refresh_now_playing_card();
 		player_refresh_now_playing();
 		return;

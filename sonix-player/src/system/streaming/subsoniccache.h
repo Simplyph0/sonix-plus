@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "src/system/streaming/subsonic.h"
+
 // Subsonic tracks downloaded to the card and then played like any other file.
 //
 // The reasons are the ones qobuzcache.h gives for Qobuz: the decoders want a
@@ -84,11 +86,10 @@ bool subsoniccache_network_wanted(void);
 bool subsoniccache_owns(const char *path);
 const char *subsoniccache_dir(void);
 
-// Writes beside the track what the API knows and the file does not: its tags
-// (in `<file>.tags`, read by metadata.c) and, when `cover_url` is given, the
-// cover (in `<key>.jpg`, found by the cover loader).
-void subsoniccache_write_sidecars(const char *track_id, const char *suffix, const char *title, const char *artist,
-								  const char *album, const char *album_id, int track_number, const char *cover_url);
+// Writes beside the track what the API knows and the file does not: its tags,
+// year, genre and ReplayGain (in `<file>.tags`, read by metadata.c) and, when
+// `cover_url` is given, the cover (in `<key>.jpg`, found by the cover loader).
+void subsoniccache_write_sidecars(const subsonic_track_t *track, const char *cover_url);
 
 // The album id the track belongs to, read back from the sidecar.
 bool subsoniccache_album_id(const char *path, char *out, size_t size);

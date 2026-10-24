@@ -730,14 +730,13 @@ bool subsoniccache_start(const char *track_id, const char *url, const char *suff
 // sidecar files: what the API knows and the audio file does not
 // ---------------------------------------------------------------------------
 
-void subsoniccache_write_sidecars(const char *track_id, const char *suffix, const char *title, const char *artist,
-								  const char *album, const char *album_id, int track_number, const char *cover_url) {
+void subsoniccache_write_sidecars(const subsonic_track_t *t, const char *cover_url) {
 	if (!subsoniccache_ready() || !ensure_dir()) {
 		return;
 	}
 
 	char path[512];
-	subsoniccache_path(track_id, suffix, path, sizeof(path));
+	subsoniccache_path(t->id, t->suffix, path, sizeof(path));
 	if (!path[0]) {
 		return;
 	}
@@ -751,11 +750,26 @@ void subsoniccache_write_sidecars(const char *track_id, const char *suffix, cons
 	snprintf(tags_tmp, sizeof(tags_tmp), "%s.tmp", tags);
 	FILE *f = fopen(tags_tmp, "w");
 	if (f) {
-		fprintf(f, "title=%s\n", title ? title : "");
-		fprintf(f, "artist=%s\n", artist ? artist : "");
-		fprintf(f, "album=%s\n", album ? album : "");
-		fprintf(f, "album_id=%s\n", album_id ? album_id : "");
-		fprintf(f, "track=%d\n", track_number);
+		fprintf(f, "title=%s\n", t->title);
+		fprintf(f, "artist=%s\n", t->artist);
+		fprintf(f, "album=%s\n", t->album);
+		fprintf(f, "album_id=%s\n", t->album_id);
+		fprintf(f, "track=%d\n", t->track_number);
+		if (t->disc > 0) {
+			fprintf(f, "disc=%d\n", t->disc);
+		}
+		if (t->year > 0) {
+			fprintf(f, "year=%d\n", t->year);
+		}
+		if (t->genre[0]) {
+			fprintf(f, "genre=%s\n", t->genre);
+		}
+		if (t->has_gain) {
+			fprintf(f, "track_gain=%.2f\n", (double)t->track_gain);
+			fprintf(f, "album_gain=%.2f\n", (double)t->album_gain);
+			fprintf(f, "track_peak=%.6f\n", (double)t->track_peak);
+			fprintf(f, "album_peak=%.6f\n", (double)t->album_peak);
+		}
 		fclose(f);
 		if (rename(tags_tmp, tags) != 0) {
 			remove(tags_tmp);

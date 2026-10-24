@@ -2,14 +2,19 @@
 
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "src/gui/fonts/fonts.h"
+#include "src/gui/library/playlistpage.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/gui/shell/azindex.h"
 #include "src/gui/shell/confirm.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
+#include "src/gui/shell/popover.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/switcher.h"
@@ -27,34 +32,165 @@
 #include "src/system/streaming/streamturn.h"
 #include "src/system/streaming/subsonic.h"
 #include "src/system/streaming/subsoniccache.h"
+#include "src/system/streaming/subsonicdb.h"
 
 // ---------------------------------------------------------------------------
 // Subsonic front end.
 //
-// Built the way the Qobuz page is, because the constraints are the same:
-// everything that talks to the network BLOCKS (see subsonic.h), so none of it
-// runs on the GUI thread. There is a single worker with a single slot for the
-// job to do, and results come back through gui_post(). Touching a second entry
-// while the first is still loading means the second is what matters: the first
-// is dropped, not queued.
+// The lists are made from the local copy of the server's songs (subsonicdb.h),
+// not from requests: All songs, Artists, Albums, Genres, Starred and Recently
+// added open at once, sorted as the library sorts, with the A-Z strip, and
+// search is a query on the same copy. The network is used for the three things
+// it is needed for: bringing the copy up to date, the server's playlists, and
+// the music itself.
 //
-// Smaller than Qobuz in two ways. There is no account to write to (no
-// favourites, no playlists edited from here), and the lists carry no covers: the
-// cover of the track that plays arrives with the track, as a sidecar.
+// Everything that talks to the network BLOCKS (see subsonic.h), so none of it
+// runs on the GUI thread: a single worker with a single slot for the job to do,
+// and results come back through gui_post(). Touching a second entry while the
+// first is still loading means the second is what matters.
+//
+// A list of thousands of rows is windowed, as the file browser is: a fixed pool
+// of row widgets is pointed at whichever rows are on screen, and the rows
+// themselves are read from the database a window at a time.
 // ---------------------------------------------------------------------------
 
-#define PAGE_LIMIT 50
-// Four pages, as for Qobuz: every entry is static memory on a device with 64 MB.
-#define MAX_HELD (4 * PAGE_LIMIT)
+// Server playlists are held whole: they are short, and the server does not page them.
+#define MAX_HELD 300
 
 // How many tracks to prefetch while one plays.
 #define PREFETCH_AHEAD 2
 
+// Tracks handed to the player when a row is tapped: the list from a little
+// before the tapped row onwards. The whole of a twenty-thousand-song list is
+// not a queue anyone plays through, and the player holds every entry.
+#define QUEUE_MAX 400
+#define QUEUE_BEFORE 40
+
+// Of those, how many get their tag files at once. The rest get them when they
+// are downloaded; writing four hundred files is a wait on a memory card.
+#define QUEUE_TAGS_NOW 24
+
+// Row geometry. The pitch is what the windowing maths is built on.
+#define ROW_HEIGHT 88
+#define ROW_GAP 8
+#define ROW_PITCH (ROW_HEIGHT + ROW_GAP)
+#define ROW_POOL 10
+#define ROW_PAD 16
+#define PLAYMARK_WIDTH 6
+#define PLAYMARK_HEIGHT 52
+
+// The rows read from the database at a time.
+#define WINDOW 48
+
 lv_obj_t *subsonic_screen;
+static gui_config_t *g_cfg;
+
+// Where the card is: the real one, or on the simulator the folder standing in
+// for it (the same choice main.c makes for the other caches).
+static const char *card_root(void) {
+	const char *root = storage_sd_root();
+#ifdef HOST_BUILD
+	// The simulator names /mnt/sd_0 whether or not it exists on this machine.
+	if (!root || !root[0] || access(root, W_OK) != 0) {
+		return g_cfg->sd_root_path;
+	}
+#endif
+	return root && root[0] ? root : g_cfg->sd_root_path;
+}
 static lv_obj_t *login_screen;
-static lv_obj_t *list_screen;
+lv_obj_t *subsonic_list_screen;
+#define list_screen subsonic_list_screen
 static lv_obj_t *search_screen;
 static lv_obj_t *settings_screen;
+
+// ---------------------------------------------------------------------------
+// what the list is showing
+// ---------------------------------------------------------------------------
+
+typedef enum {
+	VIEW_NONE = 0,
+	VIEW_SONGS,		  // songs from the database
+	VIEW_NAMES,		  // artists, albums or genres from the database
+	VIEW_PLAYLISTS,	  // the server's playlists
+	VIEW_PLAYLIST_SONGS, // one of them
+} view_kind_t;
+
+typedef struct {
+	view_kind_t kind;
+	sdb_filter_t filter;  // VIEW_SONGS
+	sdb_names_t names;	  // VIEW_NAMES
+	char value[SUBSONIC_ID_MAX]; // the filter's argument, or the playlist id
+	char title[160];
+	int scroll;			  // where the list was left, for the way back
+} view_t;
+
+static view_t view;		   // what is on screen
+static int view_count;	   // rows in it
+
+// A window of rows read ahead of the scroll position.
+static subsonic_track_t win_tracks[WINDOW];
+static sdb_name_t win_names[WINDOW];
+static int win_first = -1;
+static int win_n;
+
+// The server's playlists, and the songs of one, held whole.
+static subsonic_playlist_t held_playlists[MAX_HELD];
+static subsonic_track_t held_tracks[MAX_HELD];
+static int held_playlist_count;
+static int held_track_count;
+
+static bool view_has_songs(void) { return view.kind == VIEW_SONGS || view.kind == VIEW_PLAYLIST_SONGS; }
+
+static void win_drop(void) {
+	win_first = -1;
+	win_n = 0;
+}
+
+// Reads the rows around `index` if they are not in the window already.
+static bool win_ensure(int index) {
+	if (index < 0 || index >= view_count) {
+		return false;
+	}
+	if (win_first >= 0 && index >= win_first && index < win_first + win_n) {
+		return true;
+	}
+	int first = index - ROW_POOL;
+	if (first < 0) {
+		first = 0;
+	}
+	int n = 0;
+	switch (view.kind) {
+	case VIEW_SONGS:
+		n = sdb_songs(view.filter, view.value[0] ? view.value : NULL, first, WINDOW, win_tracks);
+		break;
+	case VIEW_NAMES:
+		n = sdb_names(view.names, first, WINDOW, win_names);
+		break;
+	case VIEW_PLAYLIST_SONGS:
+		for (; n < WINDOW && first + n < held_track_count; n++) {
+			win_tracks[n] = held_tracks[first + n];
+		}
+		break;
+	case VIEW_PLAYLISTS:
+		n = 0; // read straight from held_playlists
+		win_first = first;
+		win_n = held_playlist_count - first < WINDOW ? held_playlist_count - first : WINDOW;
+		return win_n > 0;
+	default:
+		break;
+	}
+	if (n <= 0) {
+		win_drop();
+		return false;
+	}
+	win_first = first;
+	win_n = n;
+	return index < first + n;
+}
+
+static const subsonic_track_t *track_row(int index) {
+	return win_ensure(index) ? &win_tracks[index - win_first] : NULL;
+}
 
 // ---------------------------------------------------------------------------
 // the worker
@@ -63,31 +199,23 @@ static lv_obj_t *settings_screen;
 typedef enum {
 	JOB_NONE = 0,
 	JOB_LOGIN,
-	JOB_ARTISTS,
-	JOB_ARTIST_ALBUMS,
-	JOB_ALBUMS_NEWEST,
-	JOB_ALBUMS_AZ,
-	JOB_ALBUMS_FREQUENT,
-	JOB_ALBUMS_RANDOM,
-	JOB_ALBUM_TRACKS,
 	JOB_PLAYLISTS,
-	JOB_PLAYLIST_TRACKS,
-	JOB_STARRED,
-	JOB_SEARCH_TRACKS,
-	JOB_SEARCH_ALBUMS,
-	JOB_SEARCH_ARTISTS,
+	JOB_PLAYLIST_SONGS,
 	JOB_PLAY,
+	JOB_STAR,
 } job_kind_t;
 
 typedef struct {
 	job_kind_t kind;
-	char text[256];	  // search terms, or the title of what was opened
+	char text[256];	  // a title
 	char server[256]; // login: the server address
 	char user[96];	  // login: the user name
 	char password[128];
 	char id[SUBSONIC_ID_MAX];
-	int index;	// which track of the list playback starts from
-	int offset; // first entry of this page: 0 = new list
+	int index; // JOB_PLAY: the row tapped
+	bool on;   // JOB_STAR
+	bool push; // a list job: open the result as a step forward
+	view_t from; // JOB_PLAY: the list it was tapped in, as it was
 } job_t;
 
 static pthread_mutex_t job_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -96,25 +224,10 @@ static job_t pending;
 static bool have_pending;
 static bool worker_started;
 
-// What came back. Only the worker writes here, and the GUI reads inside the
-// async that runs after the worker is done.
-static subsonic_track_t result_tracks[MAX_HELD];
-static subsonic_album_t result_albums[MAX_HELD];
-static subsonic_artist_t result_artists[MAX_HELD];
-static subsonic_playlist_t result_playlists[MAX_HELD];
-static int result_count;
-static int result_from; // where the last page received starts (0 = new list)
+// What the worker has to say about the last job.
 static job_kind_t result_kind;
 static char result_error[256];
 static char result_title[160];
-
-// What the list is showing right now, so a row tap knows what to do.
-static job_kind_t list_kind;
-
-// Pagination: the last page came back full, so there may be another -- and one
-// request at a time.
-static bool page_more;
-static bool page_loading;
 
 static void submit(const job_t *job) {
 	pthread_mutex_lock(&job_lock);
@@ -164,210 +277,19 @@ static void build_busy_layer(void) {
 	lv_obj_set_style_image_recolor_opa(spin, LV_OPA_COVER, 0);
 }
 
-// ---------------------------------------------------------------------------
-// the result list
-// ---------------------------------------------------------------------------
-
-static lv_obj_t *list_container;
-static lv_obj_t *list_title;
-static lv_obj_t *list_empty;
-
-static void rebuild_home(void);
-static void row_clicked_cb(lv_event_t *e);
 static void run(const job_t *job);
-
-static void duration_text(int seconds, char *out, size_t size) {
-	if (seconds <= 0) {
-		out[0] = '\0';
-		return;
-	}
-	snprintf(out, size, "%d:%02d", seconds / 60, seconds % 60);
-}
-
-// One list row: name on top, detail below. The two labels form a flex column
-// with a declared gap, each exactly one line high, so too-long text can only
-// end in an ellipsis instead of wrapping over the subtitle.
-static lv_obj_t *make_row(const char *name, const char *detail, int index) {
-	lv_obj_t *row = lv_btn_create(list_container);
-	lv_obj_set_size(row, lv_pct(100), 88);
-	lv_obj_add_style(row, &theme_style_card, 0);
-	lv_obj_add_style(row, &theme_style_card_pressed, LV_STATE_PRESSED);
-	lv_obj_set_style_radius(row, 12, 0);
-	lv_obj_set_style_border_width(row, 0, 0);
-	lv_obj_set_style_shadow_width(row, 0, 0);
-	lv_obj_set_style_pad_hor(row, 16, 0);
-	lv_obj_set_style_pad_ver(row, 0, 0);
-	lv_obj_set_scrollable(row, false);
-	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	// Gestures (back, and pulling in the player sheet) often start on a row, and
-	// a button keeps the press to itself.
-	lv_obj_set_event_bubble(row, true);
-	lv_obj_add_event_cb(row, row_clicked_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
-
-	lv_obj_t *texts = lv_obj_create(row);
-	lv_obj_set_flex_grow(texts, 1);
-	lv_obj_set_height(texts, LV_SIZE_CONTENT);
-	lv_obj_set_style_bg_opa(texts, 0, 0);
-	lv_obj_set_style_border_width(texts, 0, 0);
-	lv_obj_set_style_pad_all(texts, 0, 0);
-	lv_obj_set_style_pad_row(texts, 6, 0);
-	lv_obj_set_scrollable(texts, false);
-	lv_obj_set_event_bubble(texts, true);
-	lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(texts, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-
-	lv_obj_t *label = lv_label_create(texts);
-	lv_label_set_text(label, name);
-	lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-	lv_obj_set_width(label, lv_pct(100));
-	lv_obj_set_height(label, lv_font_get_line_height(&font_ui_22));
-	lv_obj_add_style(label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(label, &font_ui_22, 0);
-
-	if (detail && detail[0]) {
-		lv_obj_t *sub = lv_label_create(texts);
-		lv_label_set_text(sub, detail);
-		lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
-		lv_obj_set_width(sub, lv_pct(100));
-		lv_obj_set_height(sub, lv_font_get_line_height(&font_ui_18));
-		lv_obj_add_style(sub, &theme_style_text_dim, 0);
-		lv_obj_set_style_text_font(sub, &font_ui_18, 0);
-	}
-	return row;
-}
-
-// "FLAC 24/96 · 5:12", or "MP3 320 kbps · 3:42" when the server says what it
-// has, and the length alone when it does not.
-static void track_detail(const subsonic_track_t *t, char *out, size_t size) {
-	char length[16];
-	duration_text(t->duration, length, sizeof(length));
-
-	char format[48] = "";
-	char suffix[8];
-	snprintf(suffix, sizeof(suffix), "%s", t->suffix);
-	for (char *p = suffix; *p; p++) {
-		if (*p >= 'a' && *p <= 'z') {
-			*p = (char)(*p - 'a' + 'A');
-		}
-	}
-	if (t->bit_depth > 0 && t->sample_rate > 0) {
-		if (t->sample_rate % 1000 == 0) {
-			snprintf(format, sizeof(format), "%s %d/%d", suffix, t->bit_depth, t->sample_rate / 1000);
-		} else {
-			snprintf(format, sizeof(format), "%s %d/%d.%d", suffix, t->bit_depth, t->sample_rate / 1000,
-					 (t->sample_rate % 1000) / 100);
-		}
-	} else if (t->bitrate > 0) {
-		snprintf(format, sizeof(format), "%s %d kbps", suffix, t->bitrate);
-	}
-
-	snprintf(out, size, "%s%s%s%s%s", t->artist, t->artist[0] && format[0] ? " \xC2\xB7 " : "", format,
-			 (t->artist[0] || format[0]) && length[0] ? " \xC2\xB7 " : "", length);
-}
-
-// `from` is the first row to create: 0 rebuilds everything, a higher value
-// APPENDS the new rows without touching the others, which keeps the scroll
-// position steady when the next page arrives.
-static void fill_list(int from) {
-	if (from == 0) {
-		lv_obj_clean(list_container);
-	}
-	list_kind = result_kind;
-
-	for (int i = from; i < result_count; i++) {
-		char detail[400];
-		switch (result_kind) {
-		case JOB_ALBUM_TRACKS:
-		case JOB_PLAYLIST_TRACKS:
-		case JOB_STARRED:
-		case JOB_SEARCH_TRACKS: {
-			track_detail(&result_tracks[i], detail, sizeof(detail));
-			make_row(result_tracks[i].title, detail, i);
-			break;
-		}
-		case JOB_ARTIST_ALBUMS:
-		case JOB_ALBUMS_NEWEST:
-		case JOB_ALBUMS_AZ:
-		case JOB_ALBUMS_FREQUENT:
-		case JOB_ALBUMS_RANDOM:
-		case JOB_SEARCH_ALBUMS: {
-			const subsonic_album_t *a = &result_albums[i];
-			snprintf(detail, sizeof(detail), "%s%s%s", a->artist, a->artist[0] && a->year[0] ? " \xC2\xB7 " : "",
-					 a->year);
-			make_row(a->title, detail, i);
-			break;
-		}
-		case JOB_ARTISTS:
-		case JOB_SEARCH_ARTISTS: {
-			const subsonic_artist_t *a = &result_artists[i];
-			detail[0] = '\0';
-			if (a->album_count > 0) {
-				snprintf(detail, sizeof(detail), "%d %s", a->album_count, tr("albums"));
-			}
-			make_row(a->name, detail, i);
-			break;
-		}
-		case JOB_PLAYLISTS: {
-			const subsonic_playlist_t *p = &result_playlists[i];
-			snprintf(detail, sizeof(detail), "%s%s%d", p->owner, p->owner[0] ? " \xC2\xB7 " : "", p->track_count);
-			make_row(p->name, detail, i);
-			break;
-		}
-		default:
-			break;
-		}
-	}
-
-	lv_obj_set_hidden(list_empty, result_count != 0);
-	lv_label_set_text(list_title, result_title);
-}
-
-// ---------------------------------------------------------------------------
-// what comes back from the worker, on the GUI thread
-// ---------------------------------------------------------------------------
-
-static void job_done_cb(void *user) {
-	(void)user;
-	busy_hide();
-
-	if (result_error[0]) {
-		gui_notify_popup(result_error);
-		page_loading = false;
-		return;
-	}
-
-	switch (result_kind) {
-	case JOB_LOGIN:
-		rebuild_home();
-		switch_screen(subsonic_screen);
-		toast_success("signed_in");
-		break;
-
-	case JOB_PLAY:
-		// Nothing: the worker opened the player the instant the music started.
-		break;
-
-	default:
-		fill_list(result_from);
-		page_loading = false;
-		// A full last page probably means there is another. The random list is
-		// not one list but a fresh draw each time: asking for more would repeat.
-		page_more = result_kind != JOB_ALBUMS_RANDOM && (result_count - result_from == PAGE_LIMIT) &&
-					result_count < MAX_HELD;
-		if (lv_screen_active() != list_screen && result_from == 0) {
-			switch_screen(list_screen);
-		}
-		break;
-	}
-}
 
 // ---------------------------------------------------------------------------
 // playback
 //
 // The tapped track downloads and starts by itself. The ones after it, in the
-// same list, download while it plays and are queued as they arrive: an album
-// plays straight through without waiting for the whole thing to land first.
+// same list, download while it plays: a list plays straight through without
+// waiting for any of it to land first.
+//
+// Any file in the cache is looked up in the database by the key its name
+// carries, so the same machinery serves a queue made here, a favourite, a saved
+// playlist and the track menu's "Add to queue": whatever puts one of these paths
+// in the queue, the player comes back to this to have it downloaded.
 // ---------------------------------------------------------------------------
 
 static void slow_start_async(void *user) {
@@ -493,10 +415,6 @@ static uint32_t prefetch_failed_ms;
 
 static void *prefetch_main(void *arg);
 
-// The whole queued list, for the prefetch thread and for on-demand requests.
-static subsonic_track_t queued_tracks[MAX_HELD];
-static int queued_count;
-
 static void prefetch_submit(void) {
 	pthread_mutex_lock(&prefetch_lock);
 	if (!prefetch_started) {
@@ -527,6 +445,7 @@ static void prefetch_urgent(const char *wanted_path) {
 	snprintf(prefetch_want_key, sizeof(prefetch_want_key), "%s", key);
 	pthread_cond_broadcast(&prefetch_ready);
 	pthread_mutex_unlock(&prefetch_lock);
+	prefetch_submit();
 }
 
 static void write_track_sidecars(const subsonic_track_t *t, bool with_cover) {
@@ -534,11 +453,11 @@ static void write_track_sidecars(const subsonic_track_t *t, bool with_cover) {
 	if (with_cover && t->cover_id[0]) {
 		subsonic_cover_url(t->cover_id, 600, cover, sizeof(cover));
 	}
-	subsoniccache_write_sidecars(t->id, t->suffix, t->title, t->artist, t->album, t->album_id, t->track_number, cover);
+	subsoniccache_write_sidecars(t, cover);
 }
 
-// Downloads one track of the list while another plays: address, download, and
-// the sidecar files (tags and cover) so everything is ready by its turn.
+// Downloads one track while another plays: address, download, and the sidecar
+// files (tags and cover) so everything is ready by its turn.
 static bool prepare_track(const subsonic_track_t *track, char *path, size_t size) {
 	char url[SUBSONIC_URL_MAX];
 	if (!subsonic_stream_url(track->id, url, sizeof(url))) {
@@ -557,11 +476,44 @@ static bool prepare_track(const subsonic_track_t *track, char *path, size_t size
 	return true;
 }
 
-static void do_play(int index) {
-	if (index < 0 || index >= result_count) {
-		return;
+// The tracks of a list as the queue: from a little before `index`.
+static int queue_tracks(const view_t *from, int index, subsonic_track_t *out, int *start_out) {
+	int first = index - QUEUE_BEFORE;
+	if (first < 0) {
+		first = 0;
 	}
-	const subsonic_track_t *track = &result_tracks[index];
+	int n = 0;
+	if (from->kind == VIEW_SONGS) {
+		n = sdb_songs(from->filter, from->value[0] ? from->value : NULL, first, QUEUE_MAX, out);
+	} else if (from->kind == VIEW_PLAYLIST_SONGS) {
+		for (; n < QUEUE_MAX && first + n < held_track_count; n++) {
+			out[n] = held_tracks[first + n];
+		}
+	}
+	*start_out = index - first;
+	return n;
+}
+
+static void do_play(const job_t *job) {
+	subsonic_track_t *tracks = malloc(sizeof(*tracks) * QUEUE_MAX);
+	char (*paths)[512] = malloc(sizeof(*paths) * QUEUE_MAX);
+	const char **path_ptr = malloc(sizeof(*path_ptr) * QUEUE_MAX);
+	if (!tracks || !paths || !path_ptr) {
+		snprintf(result_error, sizeof(result_error), "%s", tr("out_of_memory"));
+		goto done;
+	}
+
+	int start = 0;
+	int n = queue_tracks(&job->from, job->index, tracks, &start);
+	if (n <= 0 || start >= n) {
+		goto done;
+	}
+	// A list the database did not give (a server playlist) is put in it, so
+	// that every path in the queue can be looked up again.
+	if (job->from.kind == VIEW_PLAYLIST_SONGS) {
+		sdb_remember(tracks, n);
+	}
+	const subsonic_track_t *track = &tracks[start];
 
 	// Whatever was downloading for another track is no longer needed.
 	streamturn_abandon_all();
@@ -569,55 +521,49 @@ static void do_play(int index) {
 	char url[SUBSONIC_URL_MAX];
 	if (!subsonic_stream_url(track->id, url, sizeof(url))) {
 		snprintf(result_error, sizeof(result_error), "%s", tr("subsonic_no_track_address"));
-		return;
+		goto done;
 	}
 
 	char path[512];
 	if (!subsoniccache_start(track->id, url, track->suffix, track->duration, path, sizeof(path))) {
 		const char *why = subsoniccache_last_error();
 		snprintf(result_error, sizeof(result_error), "%s", why && why[0] ? why : tr("download_failed"));
-		return;
+		goto done;
 	}
 	subsoniccache_note_played(path);
 
 	// Tags BEFORE starting playback: that is when device_state reads the metadata.
 	write_track_sidecars(track, false);
 
-	// The queue is the WHOLE list, not only what has downloaded: every path is
+	// The queue is the whole list, not only what has downloaded: every path is
 	// known before the track is, since the file is named after the id and the
 	// suffix the server reported.
-	static char paths[MAX_HELD][512];
-	static const char *path_ptr[MAX_HELD];
-
-	queued_count = 0;
-	int start = 0;
-	for (int i = 0; i < result_count && queued_count < MAX_HELD; i++) {
-		if (i == index) {
-			start = queued_count;
-			snprintf(paths[queued_count], sizeof(paths[0]), "%s", path);
+	for (int i = 0; i < n; i++) {
+		if (i == start) {
+			snprintf(paths[i], sizeof(paths[0]), "%s", path);
 		} else {
-			subsoniccache_path(result_tracks[i].id, result_tracks[i].suffix, paths[queued_count], sizeof(paths[0]));
+			subsoniccache_path(tracks[i].id, tracks[i].suffix, paths[i], sizeof(paths[0]));
 		}
-		path_ptr[queued_count] = paths[queued_count];
-		queued_tracks[queued_count] = result_tracks[i];
-		queued_count++;
+		path_ptr[i] = paths[i];
 	}
 
-	// Tags for the whole queue at once: a few dozen bytes each, and without them
-	// the queue page would show file names for everything not yet downloaded.
-	for (int i = 0; i < queued_count; i++) {
-		if (i != start) {
-			write_track_sidecars(&queued_tracks[i], false);
-		}
+	// Tags for the first of the rest at once, so the queue page names them.
+	for (int i = start + 1; i < n && i < start + 1 + QUEUE_TAGS_NOW; i++) {
+		write_track_sidecars(&tracks[i], false);
 	}
 
-	device_state_play_list(path_ptr, queued_count, start);
+	device_state_play_list(path_ptr, n, start);
 
 	// The cover last, with the music already playing: it is another download.
 	write_track_sidecars(track, true);
 
 	gui_post(play_started_async, NULL);
 	prefetch_submit();
+
+done:
+	free(tracks);
+	free(paths);
+	free(path_ptr);
 }
 
 // The queue watchdog, once a second on the GUI thread. It tells the cache which
@@ -627,49 +573,51 @@ static void do_play(int index) {
 // that is exactly the one being waited for.
 static void queue_watch_cb(lv_timer_t *timer) {
 	(void)timer;
-	// A queue that is a library list holds no cache files. The bookkeeping below
-	// still has to run: the flag keeping Wi-Fi awake is only lowered here.
-	bool library_queue = playlist_is_library_backed();
-	if (library_queue) {
-		subsoniccache_set_protected(NULL, 0);
-		waiting_for_track = false;
-	}
-
-	// Nothing more is asked of the network while the Wi-Fi transfer is on: the
-	// track would land on a card another process is writing.
-	bool transfer_on = wifitransfer_get_enabled();
-	if (transfer_on) {
-		waiting_for_track = false;
-	}
-
 	int count = playlist_count();
 	int current = playlist_current_index();
 
-	static char queued[SUBSONICCACHE_PROTECTED_MAX][512];
-	static const char *queued_ptr[SUBSONICCACHE_PROTECTED_MAX];
+	// The queue of a library list is read from the database one entry at a time,
+	// so only a short window is looked at -- and only when it has any of ours.
+	static char window[SUBSONICCACHE_PROTECTED_MAX][512];
+	static const char *window_ptr[SUBSONICCACHE_PROTECTED_MAX];
 	int protect = 0;
-	for (int i = current; !library_queue && i >= 0 && i < count && protect < SUBSONICCACHE_PROTECTED_MAX; i++) {
-		if (playlist_path_at(i, queued[protect], sizeof(queued[0]))) {
-			queued_ptr[protect] = queued[protect];
-			protect++;
-		}
-	}
-	if (!library_queue) {
-		subsoniccache_set_protected(queued_ptr, protect);
-	}
-
+	bool ours = false;
 	char want[SUBSONICCACHE_KEY_MAX] = "";
-	if (!library_queue && !transfer_on && current >= 0 && queued_count > 0) {
-		for (int i = current; i <= current + PREFETCH_AHEAD && i < count && !want[0]; i++) {
-			char path[512];
-			char key[SUBSONICCACHE_KEY_MAX];
-			if (!playlist_path_at(i, path, sizeof(path)) || !subsoniccache_key_from_path(path, key, sizeof(key))) {
+	bool transfer_on = wifitransfer_get_enabled();
+
+	for (int i = current; i >= 0 && i < count && i <= current + PREFETCH_AHEAD; i++) {
+		if (!playlist_path_at(i, window[protect], sizeof(window[0]))) {
+			continue;
+		}
+		if (!subsoniccache_owns(window[protect])) {
+			continue;
+		}
+		ours = true;
+		window_ptr[protect] = window[protect];
+		char key[SUBSONICCACHE_KEY_MAX];
+		if (!want[0] && !transfer_on && subsoniccache_key_from_path(window[protect], key, sizeof(key)) &&
+			!subsoniccache_has(key, path_suffix(window[protect]), NULL, 0)) {
+			snprintf(want, sizeof(want), "%s", key);
+		}
+		protect++;
+	}
+	// And the rest of what is lined up, kept from the sweep: only walked when
+	// the track playing is one of ours.
+	if (ours) {
+		for (int i = current + PREFETCH_AHEAD + 1; i < count && protect < SUBSONICCACHE_PROTECTED_MAX; i++) {
+			if (!playlist_path_at(i, window[protect], sizeof(window[0]))) {
 				continue;
 			}
-			if (!subsoniccache_has(key, path_suffix(path), NULL, 0)) {
-				snprintf(want, sizeof(want), "%s", key);
+			if (subsoniccache_owns(window[protect])) {
+				window_ptr[protect] = window[protect];
+				protect++;
 			}
 		}
+	}
+	subsoniccache_set_protected(window_ptr, protect);
+
+	if (transfer_on) {
+		waiting_for_track = false;
 	}
 
 	pthread_mutex_lock(&prefetch_lock);
@@ -678,12 +626,14 @@ static void queue_watch_cb(lv_timer_t *timer) {
 		pthread_cond_broadcast(&prefetch_ready);
 	}
 	pthread_mutex_unlock(&prefetch_lock);
+	if (want[0]) {
+		prefetch_submit();
+	}
 
 	// The wait only holds while the queue really points at a Subsonic track.
 	if (waiting_for_track) {
-		int index = playlist_current_index();
 		char wanted[512];
-		if (index >= 0 && playlist_path_at(index, wanted, sizeof(wanted)) && !subsoniccache_owns(wanted)) {
+		if (current >= 0 && playlist_path_at(current, wanted, sizeof(wanted)) && !subsoniccache_owns(wanted)) {
 			waiting_for_track = false;
 		}
 	}
@@ -709,19 +659,10 @@ static void *prefetch_main(void *arg) {
 			continue;
 		}
 
-		// From key to track: the data (title, duration, suffix) is taken from the
-		// queued list by SEARCHING, not by trusting a position.
-		int index = -1;
-		for (int i = 0; i < queued_count && index < 0; i++) {
-			char other[SUBSONICCACHE_KEY_MAX];
-			subsoniccache_key(queued_tracks[i].id, other, sizeof(other));
-			if (strcmp(other, key) == 0) {
-				index = i;
-			}
-		}
-
-		if (index < 0) {
-			// Not in the queue being played: wait for the watchdog to recompute.
+		subsonic_track_t track;
+		if (!sdb_find(key, &track)) {
+			// A song the database does not know: nothing can be asked of the
+			// server for it. Waited out, in case a sync is about to bring it.
 			snprintf(prefetch_failed_key, sizeof(prefetch_failed_key), "%s", key);
 			prefetch_failed_ms = lv_tick_get();
 			pthread_mutex_lock(&prefetch_lock);
@@ -732,7 +673,6 @@ static void *prefetch_main(void *arg) {
 			continue;
 		}
 
-		subsonic_track_t track = queued_tracks[index];
 		subsoniccache_wait_idle();
 
 		// While waiting for the slot the request may have changed.
@@ -775,8 +715,608 @@ static void *prefetch_main(void *arg) {
 }
 
 // ---------------------------------------------------------------------------
+// the list
+// ---------------------------------------------------------------------------
+
+typedef struct {
+	lv_obj_t *button;
+	lv_obj_t *title;
+	lv_obj_t *sub;
+	lv_obj_t *star;
+	lv_obj_t *playmark;
+	int index; // the row of the list this widget shows, -1 for none
+} row_t;
+
+static row_t rows[ROW_POOL];
+static lv_obj_t *list_viewport;
+static lv_obj_t *list_body;
+static lv_obj_t *list_title;
+static lv_obj_t *list_empty;
+static azindex_t *az;
+
+// The key of the file playing, for the mark on its row. Kept by the timer.
+static char np_key[SUBSONICCACHE_KEY_MAX];
+
+static void rebuild_home(void);
+static void open_view(const view_t *next, bool push);
+
+static void duration_text(int seconds, char *out, size_t size) {
+	if (seconds <= 0) {
+		out[0] = '\0';
+		return;
+	}
+	snprintf(out, size, "%d:%02d", seconds / 60, seconds % 60);
+}
+
+// "FLAC 24/96 · 5:12", or "MP3 320 kbps · 3:42" when the server says what it
+// has, and the length alone when it does not; the artist first.
+static void track_detail(const subsonic_track_t *t, char *out, size_t size) {
+	char length[16];
+	duration_text(t->duration, length, sizeof(length));
+
+	char format[48] = "";
+	char suffix[8];
+	snprintf(suffix, sizeof(suffix), "%s", t->suffix);
+	for (char *p = suffix; *p; p++) {
+		if (*p >= 'a' && *p <= 'z') {
+			*p = (char)(*p - 'a' + 'A');
+		}
+	}
+	if (t->bit_depth > 0 && t->sample_rate > 0) {
+		if (t->sample_rate % 1000 == 0) {
+			snprintf(format, sizeof(format), "%s %d/%d", suffix, t->bit_depth, t->sample_rate / 1000);
+		} else {
+			snprintf(format, sizeof(format), "%s %d/%d.%d", suffix, t->bit_depth, t->sample_rate / 1000,
+					 (t->sample_rate % 1000) / 100);
+		}
+	} else if (t->bitrate > 0) {
+		snprintf(format, sizeof(format), "%s %d kbps", suffix, t->bitrate);
+	}
+
+	snprintf(out, size, "%s%s%s%s%s", t->artist, t->artist[0] && format[0] ? " \xC2\xB7 " : "", format,
+			 (t->artist[0] || format[0]) && length[0] ? " \xC2\xB7 " : "", length);
+}
+
+static bool row_is_playing(int index) {
+	if (!np_key[0] || !view_has_songs()) {
+		return false;
+	}
+	const subsonic_track_t *t = track_row(index);
+	if (!t) {
+		return false;
+	}
+	char key[SUBSONICCACHE_KEY_MAX];
+	subsoniccache_key(t->id, key, sizeof(key));
+	return strcmp(key, np_key) == 0;
+}
+
+static void row_bind(row_t *row, int index) {
+	if (index < 0 || index >= view_count || !win_ensure(index)) {
+		row->index = -1;
+		lv_obj_set_hidden(row->button, true);
+		return;
+	}
+
+	char detail[400] = "";
+	const char *title = "";
+	bool starred = false;
+	switch (view.kind) {
+	case VIEW_SONGS:
+	case VIEW_PLAYLIST_SONGS: {
+		const subsonic_track_t *t = &win_tracks[index - win_first];
+		title = t->title;
+		track_detail(t, detail, sizeof(detail));
+		starred = t->starred;
+		break;
+	}
+	case VIEW_NAMES: {
+		const sdb_name_t *n = &win_names[index - win_first];
+		title = n->name;
+		snprintf(detail, sizeof(detail), "%s%s%d %s", n->sub, n->sub[0] ? " \xC2\xB7 " : "", n->count,
+				 n->count == 1 ? tr("subsonic_song") : tr("subsonic_songs"));
+		break;
+	}
+	case VIEW_PLAYLISTS: {
+		const subsonic_playlist_t *p = &held_playlists[index];
+		title = p->name;
+		snprintf(detail, sizeof(detail), "%s%s%d", p->owner, p->owner[0] ? " \xC2\xB7 " : "", p->track_count);
+		break;
+	}
+	default:
+		break;
+	}
+
+	row->index = index;
+	lv_obj_set_y(row->button, index * ROW_PITCH);
+	lv_obj_set_hidden(row->button, false);
+	lv_label_set_text(row->title, title);
+	lv_label_set_text(row->sub, detail);
+	lv_obj_set_hidden(row->sub, detail[0] == '\0');
+	lv_obj_set_hidden(row->star, !starred);
+	lv_obj_set_hidden(row->playmark, !row_is_playing(index));
+}
+
+// Assigns the row widgets to the band of entries around the scroll position:
+// quantise the scroll offset to the row pitch, start one row early, and cover
+// the viewport from there. Entry `index` always lives in widget `index %
+// ROW_POOL`, so when the band slides down by one the other nine rows are left
+// alone.
+static void window_update(void) {
+	if (view_count == 0) {
+		for (int i = 0; i < ROW_POOL; i++) {
+			row_bind(&rows[i], -1);
+		}
+		return;
+	}
+	int scroll = lv_obj_get_scroll_y(list_viewport);
+	if (scroll < 0) {
+		scroll = 0;
+	}
+	int first = (scroll / ROW_PITCH) - 1;
+	if (first + ROW_POOL > view_count) {
+		first = view_count - ROW_POOL;
+	}
+	if (first < 0) {
+		first = 0;
+	}
+	for (int i = 0; i < ROW_POOL; i++) {
+		int index = first + i;
+		row_bind(&rows[index % ROW_POOL], index < view_count ? index : -1);
+	}
+}
+
+static void list_scrolled_cb(lv_event_t *e) {
+	(void)e;
+	window_update();
+	if (az) {
+		azindex_flash(az);
+	}
+}
+
+// The strip's jump moved the list: the rows have to be bound again.
+static void az_jumped(void) { window_update(); }
+
+// ---------------------------------------------------------------------------
+// going from list to list
+//
+// Every list lives on ONE reused page, so the screen manager has nothing to
+// stack: opening an album from the artists and then going back would skip the
+// artists. The page keeps its own history -- a stack of views, with where each
+// was scrolled to.
+// ---------------------------------------------------------------------------
+
+#define HISTORY_DEPTH 8
+static view_t history[HISTORY_DEPTH];
+static int history_len;
+
+static bool list_back_has_step(void) { return history_len > 0; }
+
+static void count_view(void) {
+	switch (view.kind) {
+	case VIEW_SONGS:
+		view_count = sdb_song_count(view.filter, view.value[0] ? view.value : NULL);
+		break;
+	case VIEW_NAMES:
+		view_count = sdb_name_count(view.names);
+		break;
+	case VIEW_PLAYLISTS:
+		view_count = held_playlist_count;
+		break;
+	case VIEW_PLAYLIST_SONGS:
+		view_count = held_track_count;
+		break;
+	default:
+		view_count = 0;
+		break;
+	}
+	if (view_count < 0) {
+		view_count = 0;
+	}
+}
+
+// The strip for the list on screen: only for those sorted by title or name.
+static void set_strip(void) {
+	if (!az) {
+		return;
+	}
+	int first[LIBRARY_INDEX_BUCKETS];
+	bool have = false;
+	if (view.kind == VIEW_SONGS && (view.filter == SDB_SONGS_ALL || view.filter == SDB_SONGS_GENRE ||
+									view.filter == SDB_SONGS_STARRED)) {
+		have = sdb_song_buckets(view.filter, view.value[0] ? view.value : NULL, first);
+	} else if (view.kind == VIEW_NAMES) {
+		have = sdb_name_buckets(view.names, first);
+	}
+	azindex_set_rows(az, have ? first : NULL, view_count, false);
+}
+
+// Counts the rows again, keeping the place: after a sync, or a star.
+static void view_refresh(void) {
+	if (view.kind == VIEW_NONE) {
+		return;
+	}
+	int scroll = lv_obj_get_scroll_y(list_viewport);
+	win_drop();
+	count_view();
+	lv_obj_set_height(list_body, view_count ? view_count * ROW_PITCH : ROW_PITCH);
+	lv_obj_scroll_to_y(list_viewport, scroll, LV_ANIM_OFF);
+	lv_obj_set_hidden(list_empty, view_count != 0);
+	set_strip();
+	window_update();
+}
+
+static void open_view(const view_t *next, bool push) {
+	if (push && view.kind != VIEW_NONE && lv_screen_active() == list_screen) {
+		if (history_len == HISTORY_DEPTH) {
+			memmove(&history[0], &history[1], sizeof(history[0]) * (HISTORY_DEPTH - 1));
+			history_len--;
+		}
+		history[history_len] = view;
+		history[history_len].scroll = lv_obj_get_scroll_y(list_viewport);
+		history_len++;
+	} else if (lv_screen_active() != list_screen) {
+		history_len = 0; // entering from outside: the history restarts
+	}
+
+	view = *next;
+	win_drop();
+	count_view();
+
+	lv_label_set_text(list_title, view.title);
+	lv_obj_set_height(list_body, view_count ? view_count * ROW_PITCH : ROW_PITCH);
+	int max_scroll = view_count * ROW_PITCH - lv_obj_get_height(list_viewport);
+	int target = view.scroll;
+	if (target > max_scroll) {
+		target = max_scroll > 0 ? max_scroll : 0;
+	}
+	lv_obj_scroll_to_y(list_viewport, target < 0 ? 0 : target, LV_ANIM_OFF);
+
+	lv_label_set_text(list_empty, tr(view.kind == VIEW_SONGS && view.filter == SDB_SONGS_SEARCH ? "no_results"
+															: "subsonic_empty_library"));
+	lv_obj_set_hidden(list_empty, view_count != 0);
+	set_strip();
+	window_update();
+
+	if (lv_screen_active() != list_screen) {
+		switch_screen(list_screen);
+	}
+}
+
+static bool list_back_guard(void) {
+	if (history_len == 0) {
+		view.kind = VIEW_NONE;
+		return false; // nothing underneath: leave the page
+	}
+	view_t previous = history[--history_len];
+	if (previous.kind == VIEW_PLAYLISTS || previous.kind == VIEW_PLAYLIST_SONGS) {
+		// Held only while on screen: read again.
+		job_t job = {0};
+		job.kind = previous.kind == VIEW_PLAYLISTS ? JOB_PLAYLISTS : JOB_PLAYLIST_SONGS;
+		snprintf(job.id, sizeof(job.id), "%s", previous.value);
+		snprintf(job.text, sizeof(job.text), "%s", previous.title);
+		job.from = previous;
+		busy_show();
+			run(&job);
+		return true;
+	}
+	open_view(&previous, false);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// taps
+// ---------------------------------------------------------------------------
+
+static void open_songs(sdb_filter_t filter, const char *value, const char *title) {
+	view_t next = {0};
+	next.kind = VIEW_SONGS;
+	next.filter = filter;
+	snprintf(next.value, sizeof(next.value), "%s", value ? value : "");
+	snprintf(next.title, sizeof(next.title), "%s", title);
+	open_view(&next, true);
+}
+
+bool subsonicpage_open_album(const char *album_id, const char *title) {
+	if (!album_id || !album_id[0] || !subsonic_logged_in()) {
+		return false;
+	}
+	history_len = 0;
+	view.kind = VIEW_NONE;
+	open_songs(SDB_SONGS_ALBUM, album_id, title && title[0] ? title : tr("subsonic"));
+	return true;
+}
+
+static void open_names(sdb_names_t kind, const char *title) {
+	view_t next = {0};
+	next.kind = VIEW_NAMES;
+	next.names = kind;
+	snprintf(next.title, sizeof(next.title), "%s", title);
+	open_view(&next, true);
+}
+
+static row_t *row_of_button(lv_obj_t *button) {
+	for (int i = 0; i < ROW_POOL; i++) {
+		if (rows[i].button == button) {
+			return &rows[i];
+		}
+	}
+	return NULL;
+}
+
+static void row_clicked_cb(lv_event_t *e) {
+	// A gesture that ends over a row is not a tap on the row: events bubble, so
+	// the click that closes a drag arrives here too.
+	if (switcher_back_drag_active() || player_sheet_drag_active()) {
+		return;
+	}
+	row_t *row = row_of_button(lv_event_get_current_target(e));
+	if (!row || row->index < 0 || row->index >= view_count || !win_ensure(row->index)) {
+		return;
+	}
+	int index = row->index;
+
+	switch (view.kind) {
+	case VIEW_SONGS:
+	case VIEW_PLAYLIST_SONGS: {
+		job_t job = {0};
+		job.kind = JOB_PLAY;
+		job.index = index;
+		job.from = view;
+		run(&job);
+		return;
+	}
+	case VIEW_NAMES: {
+		const sdb_name_t *n = &win_names[index - win_first];
+		sdb_filter_t filter = view.names == SDB_NAMES_ARTISTS ? SDB_SONGS_ARTIST
+							  : view.names == SDB_NAMES_ALBUMS ? SDB_SONGS_ALBUM
+															   : SDB_SONGS_GENRE;
+		char value[SUBSONIC_ID_MAX], title[SUBSONIC_TITLE_MAX];
+		snprintf(value, sizeof(value), "%s", n->value);
+		snprintf(title, sizeof(title), "%s", n->name);
+		open_songs(filter, value, title);
+		return;
+	}
+	case VIEW_PLAYLISTS: {
+		job_t job = {0};
+		job.kind = JOB_PLAYLIST_SONGS;
+		snprintf(job.id, sizeof(job.id), "%s", held_playlists[index].id);
+		snprintf(job.text, sizeof(job.text), "%s", held_playlists[index].name);
+		run(&job);
+		return;
+	}
+	default:
+		return;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// the row menu: what a long press on a song offers
+// ---------------------------------------------------------------------------
+
+static subsonic_track_t menu_track;
+static popover_item_t menu_items[6];
+
+static void menu_path(char *out, size_t size) { subsoniccache_path(menu_track.id, menu_track.suffix, out, size); }
+
+// A path that goes to the queue or a playlist is read for its name by the
+// player at once, so the tags are written first.
+static bool menu_prepare(char *path, size_t size) {
+	if (!subsoniccache_ready()) {
+		gui_notify_popup("download_no_card");
+		return false;
+	}
+	write_track_sidecars(&menu_track, false);
+	menu_path(path, size);
+	return path[0] != '\0';
+}
+
+static void menu_enqueue(void *user) {
+	(void)user;
+	char path[512];
+	if (menu_prepare(path, sizeof(path)) && playlist_enqueue(path)) {
+		toast_success("added_to_the_queue");
+	}
+}
+
+static void menu_next(void *user) {
+	(void)user;
+	char path[512];
+	if (menu_prepare(path, sizeof(path)) && playlist_insert_next(path)) {
+		toast_success("added_to_the_queue");
+	}
+}
+
+static void menu_playlist(void *user) {
+	(void)user;
+	char path[512];
+	if (menu_prepare(path, sizeof(path))) {
+		playlistpage_add_track(path);
+	}
+}
+
+static void menu_star(void *user) {
+	(void)user;
+	job_t job = {0};
+	job.kind = JOB_STAR;
+	snprintf(job.id, sizeof(job.id), "%s", menu_track.id);
+	job.on = !menu_track.starred;
+	run(&job);
+}
+
+static void menu_album(void *user) {
+	(void)user;
+	if (menu_track.album_id[0]) {
+		open_songs(SDB_SONGS_ALBUM, menu_track.album_id, menu_track.album);
+	}
+}
+
+static void menu_artist(void *user) {
+	(void)user;
+	if (menu_track.artist[0]) {
+		open_songs(SDB_SONGS_ARTIST, menu_track.artist, menu_track.artist);
+	}
+}
+
+static void row_long_pressed_cb(lv_event_t *e) {
+	if (switcher_back_drag_active() || player_sheet_drag_active() || !view_has_songs()) {
+		return;
+	}
+	row_t *row = row_of_button(lv_event_get_current_target(e));
+	if (!row || row->index < 0 || !win_ensure(row->index)) {
+		return;
+	}
+	// The lift that ends this press would otherwise arrive as a click and play
+	// the row.
+	lv_indev_t *indev = lv_indev_active();
+	if (indev) {
+		lv_indev_wait_release(indev);
+	}
+
+	menu_track = win_tracks[row->index - win_first];
+	int n = 0;
+	menu_items[n++] = (popover_item_t){tr("add_to_queue"), menu_enqueue, NULL, false};
+	menu_items[n++] = (popover_item_t){tr("subsonic_play_next"), menu_next, NULL, false};
+	menu_items[n++] = (popover_item_t){tr(menu_track.starred ? "remove_from_favourites" : "medialist_add_to_favourites"),
+									   menu_star, NULL, false};
+	menu_items[n++] = (popover_item_t){tr("add_to_playlist"), menu_playlist, NULL, false};
+	if (menu_track.album_id[0] && !(view.kind == VIEW_SONGS && view.filter == SDB_SONGS_ALBUM)) {
+		menu_items[n++] = (popover_item_t){tr("show_album"), menu_album, NULL, false};
+	}
+	if (menu_track.artist[0] && !(view.kind == VIEW_SONGS && view.filter == SDB_SONGS_ARTIST)) {
+		menu_items[n++] = (popover_item_t){tr("subsonic_show_artist"), menu_artist, NULL, false};
+	}
+	popover_show(row->button, menu_items, n);
+}
+
+// ---------------------------------------------------------------------------
+// building the rows
+// ---------------------------------------------------------------------------
+
+static lv_style_t style_row;
+
+static void build_rows(int width) {
+	lv_style_init(&style_row);
+	lv_style_set_border_width(&style_row, 0);
+	lv_style_set_shadow_width(&style_row, 0);
+	lv_style_set_radius(&style_row, 12);
+	lv_style_set_pad_hor(&style_row, ROW_PAD);
+	lv_style_set_pad_ver(&style_row, 0);
+
+	for (int i = 0; i < ROW_POOL; i++) {
+		row_t *row = &rows[i];
+		row->index = -1;
+
+		row->button = lv_btn_create(list_body);
+		lv_obj_set_size(row->button, width, ROW_HEIGHT);
+		lv_obj_set_x(row->button, 0);
+		lv_obj_add_style(row->button, &theme_style_card, 0);
+		lv_obj_add_style(row->button, &style_row, 0);
+		lv_obj_add_style(row->button, &theme_style_card_pressed, LV_STATE_PRESSED);
+		lv_obj_set_hidden(row->button, true);
+		lv_obj_set_scrollable(row->button, false);
+		lv_obj_set_event_bubble(row->button, true); // so a swipe can start on a row
+		lv_obj_add_event_cb(row->button, row_clicked_cb, LV_EVENT_CLICKED, NULL);
+		lv_obj_add_event_cb(row->button, row_long_pressed_cb, LV_EVENT_LONG_PRESSED, NULL);
+		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_column(row->button, 10, 0);
+
+		// The name over the detail: two labels, each exactly one line high, in a
+		// column that takes the room the star leaves.
+		lv_obj_t *texts = lv_obj_create(row->button);
+		lv_obj_set_flex_grow(texts, 1);
+		lv_obj_set_height(texts, LV_SIZE_CONTENT);
+		lv_obj_set_style_bg_opa(texts, 0, 0);
+		lv_obj_set_style_border_width(texts, 0, 0);
+		lv_obj_set_style_pad_all(texts, 0, 0);
+		lv_obj_set_style_pad_row(texts, 6, 0);
+		lv_obj_set_scrollable(texts, false);
+		lv_obj_set_event_bubble(texts, true);
+		lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN);
+		lv_obj_set_flex_align(texts, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+		row->title = lv_label_create(texts);
+		lv_label_set_long_mode(row->title, LV_LABEL_LONG_DOT);
+		lv_obj_set_width(row->title, lv_pct(100));
+		lv_obj_set_height(row->title, lv_font_get_line_height(&font_ui_22));
+		lv_obj_add_style(row->title, &theme_style_text, 0);
+		lv_obj_set_style_text_font(row->title, &font_ui_22, 0);
+
+		row->sub = lv_label_create(texts);
+		lv_label_set_long_mode(row->sub, LV_LABEL_LONG_DOT);
+		lv_obj_set_width(row->sub, lv_pct(100));
+		lv_obj_set_height(row->sub, lv_font_get_line_height(&font_ui_18));
+		lv_obj_add_style(row->sub, &theme_style_text_dim, 0);
+		lv_obj_set_style_text_font(row->sub, &font_ui_18, 0);
+
+		row->star = lv_image_create(row->button);
+		lv_image_set_src(row->star, &icon_star_filled);
+		lv_obj_set_style_image_recolor(row->star, lv_color_make(246, 211, 45), 0); // as the player's
+		lv_obj_set_style_image_recolor_opa(row->star, LV_OPA_COVER, 0);
+		lv_obj_set_clickable(row->star, false);
+		lv_obj_set_hidden(row->star, true);
+
+		// Outside the flex layout, in the row's own left padding: marks the row
+		// that is playing without moving anything on it.
+		row->playmark = lv_obj_create(row->button);
+		lv_obj_set_ignore_layout(row->playmark, true);
+		lv_obj_set_size(row->playmark, PLAYMARK_WIDTH, PLAYMARK_HEIGHT);
+		lv_obj_align(row->playmark, LV_ALIGN_LEFT_MID, 4 - ROW_PAD, 0);
+		lv_obj_add_style(row->playmark, &theme_style_accent_bg, 0);
+		lv_obj_set_style_radius(row->playmark, LV_RADIUS_CIRCLE, 0);
+		lv_obj_set_style_border_width(row->playmark, 0, 0);
+		lv_obj_set_style_shadow_width(row->playmark, 0, 0);
+		lv_obj_set_style_pad_all(row->playmark, 0, 0);
+		lv_obj_set_scrollable(row->playmark, false);
+		lv_obj_set_clickable(row->playmark, false);
+		lv_obj_set_hidden(row->playmark, true);
+	}
+}
+
+// What is playing, kept up to date for the marks: a second is plenty.
+static lv_timer_t *mark_timer;
+
+static void mark_tick_cb(lv_timer_t *timer) {
+	(void)timer;
+	if (lv_screen_active() != list_screen) {
+		return;
+	}
+	device_state_t state;
+	device_state_get(&state);
+	char key[SUBSONICCACHE_KEY_MAX] = "";
+	subsoniccache_key_from_path(state.current_file, key, sizeof(key));
+	if (strcmp(key, np_key) != 0) {
+		snprintf(np_key, sizeof(np_key), "%s", key);
+		window_update();
+	}
+}
+
+static void list_loaded_cb(lv_event_t *e) {
+	(void)e;
+	if (mark_timer) {
+		lv_timer_resume(mark_timer);
+	}
+	// A sync, or a star, may have changed what the list holds.
+	if (view_has_songs() || view.kind == VIEW_NAMES) {
+		view_refresh();
+	}
+}
+
+static void list_unloaded_cb(lv_event_t *e) {
+	(void)e;
+	if (mark_timer) {
+		lv_timer_pause(mark_timer);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // the worker's main loop
 // ---------------------------------------------------------------------------
+
+static bool result_push;
+static view_t result_view;
+
+static void job_done_cb(void *user);
 
 static void *worker_main(void *arg) {
 	(void)arg;
@@ -792,26 +1332,9 @@ static void *worker_main(void *arg) {
 
 		result_error[0] = '\0';
 		result_kind = job.kind;
+		result_push = job.push;
+		memset(&result_view, 0, sizeof(result_view));
 
-		// Where this page starts. 0 is a new list; anything higher continues the
-		// one already held, and only the tail of the array is written.
-		int off = job.offset;
-		if (off < 0 || off >= MAX_HELD) {
-			off = 0;
-		}
-		int want = MAX_HELD - off;
-		if (want > PAGE_LIMIT) {
-			want = PAGE_LIMIT;
-		}
-
-		// Playback does NOT clear the list: what has to play is precisely the
-		// track held in it, plus the ones after it to prefetch.
-		if (job.kind != JOB_PLAY && job.kind != JOB_LOGIN && off == 0) {
-			result_count = 0;
-			result_title[0] = '\0';
-		}
-
-		int n = 0;
 		switch (job.kind) {
 		case JOB_LOGIN:
 			if (!subsonic_login(job.server, job.user, job.password)) {
@@ -820,79 +1343,48 @@ static void *worker_main(void *arg) {
 			memset(job.password, 0, sizeof(job.password));
 			break;
 
-		case JOB_ARTISTS:
-			n = subsonic_artists(off, result_artists + off, want);
-			snprintf(result_title, sizeof(result_title), "%s", tr("artists"));
+		case JOB_PLAYLISTS: {
+			int n = subsonic_playlists(0, held_playlists, MAX_HELD);
+			if (n < 0) {
+				snprintf(result_error, sizeof(result_error), "%s", subsonic_last_error());
+				break;
+			}
+			held_playlist_count = n;
+			result_view.kind = VIEW_PLAYLISTS;
+			snprintf(result_view.title, sizeof(result_view.title), "%s", tr("playlists"));
 			break;
-		case JOB_ARTIST_ALBUMS:
-			n = subsonic_artist_albums(job.id, off, result_albums + off, want);
-			snprintf(result_title, sizeof(result_title), "%.150s", job.text);
-			break;
+		}
 
-		case JOB_ALBUMS_NEWEST:
-			n = subsonic_album_list("newest", off, result_albums + off, want);
-			snprintf(result_title, sizeof(result_title), "%s", tr("subsonic_recently_added"));
+		case JOB_PLAYLIST_SONGS: {
+			int n = subsonic_playlist_tracks(job.id, 0, held_tracks, MAX_HELD);
+			if (n < 0) {
+				snprintf(result_error, sizeof(result_error), "%s", subsonic_last_error());
+				break;
+			}
+			held_track_count = n;
+			sdb_remember(held_tracks, n);
+			result_view.kind = VIEW_PLAYLIST_SONGS;
+			snprintf(result_view.value, sizeof(result_view.value), "%s", job.id);
+			snprintf(result_view.title, sizeof(result_view.title), "%s", job.text);
 			break;
-		case JOB_ALBUMS_AZ:
-			n = subsonic_album_list("alphabeticalByName", off, result_albums + off, want);
-			snprintf(result_title, sizeof(result_title), "%s", tr("albums"));
-			break;
-		case JOB_ALBUMS_FREQUENT:
-			n = subsonic_album_list("frequent", off, result_albums + off, want);
-			snprintf(result_title, sizeof(result_title), "%s", tr("subsonic_most_played"));
-			break;
-		case JOB_ALBUMS_RANDOM:
-			n = subsonic_album_list("random", off, result_albums + off, want);
-			snprintf(result_title, sizeof(result_title), "%s", tr("subsonic_random_albums"));
-			break;
-
-		case JOB_ALBUM_TRACKS:
-			n = subsonic_album_tracks(job.id, off, result_tracks + off, want);
-			snprintf(result_title, sizeof(result_title), "%.150s", job.text);
-			break;
-
-		case JOB_PLAYLISTS:
-			n = subsonic_playlists(off, result_playlists + off, want);
-			snprintf(result_title, sizeof(result_title), "%s", tr("playlists"));
-			break;
-		case JOB_PLAYLIST_TRACKS:
-			n = subsonic_playlist_tracks(job.id, off, result_tracks + off, want);
-			snprintf(result_title, sizeof(result_title), "%.150s", job.text);
-			break;
-
-		case JOB_STARRED:
-			n = subsonic_starred_tracks(off, result_tracks + off, want);
-			snprintf(result_title, sizeof(result_title), "%s", tr("subsonic_starred_tracks"));
-			break;
-
-		case JOB_SEARCH_TRACKS:
-			n = subsonic_search_tracks(job.text, off, result_tracks + off, want);
-			snprintf(result_title, sizeof(result_title), "%.150s", job.text);
-			break;
-		case JOB_SEARCH_ALBUMS:
-			n = subsonic_search_albums(job.text, off, result_albums + off, want);
-			snprintf(result_title, sizeof(result_title), "%.150s", job.text);
-			break;
-		case JOB_SEARCH_ARTISTS:
-			n = subsonic_search_artists(job.text, off, result_artists + off, want);
-			snprintf(result_title, sizeof(result_title), "%.150s", job.text);
-			break;
+		}
 
 		case JOB_PLAY:
-			do_play(job.index);
+			do_play(&job);
+			break;
+
+		case JOB_STAR:
+			if (subsonic_star(job.id, job.on)) {
+				char key[SUBSONICCACHE_KEY_MAX];
+				subsoniccache_key(job.id, key, sizeof(key));
+				sdb_set_starred(key, job.on);
+			} else {
+				snprintf(result_error, sizeof(result_error), "%s", subsonic_last_error());
+			}
 			break;
 
 		default:
 			break;
-		}
-
-		if (n < 0) {
-			snprintf(result_error, sizeof(result_error), "%s", subsonic_last_error());
-			n = 0;
-		}
-		if (job.kind != JOB_PLAY && job.kind != JOB_LOGIN) {
-			result_from = off;
-			result_count = off + n;
 		}
 
 		gui_post(job_done_cb, NULL);
@@ -911,149 +1403,140 @@ static void start_worker(void) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// going back
-//
-// Every Subsonic list lives on ONE reused page, so the screen manager has
-// nothing to stack: opening an album from the results and then going back
-// would skip the results. The page keeps its own history -- a stack of jobs --
-// and the chevron (and the gesture, through the same function) consults it
-// first; only when it is empty does back really leave the page.
-// ---------------------------------------------------------------------------
-
-#define LIST_HISTORY_DEPTH 8
-static job_t list_history[LIST_HISTORY_DEPTH];
-static int list_history_len;
-static job_t current_list_job;
-static bool have_current_list;
-
-static bool job_is_list(job_kind_t kind) { return kind != JOB_PLAY && kind != JOB_LOGIN && kind != JOB_NONE; }
-
-static bool list_back_has_step(void) { return list_history_len > 0; }
-
-static bool list_back_guard(void) {
-	if (list_history_len == 0) {
-		have_current_list = false;
-		return false; // nothing underneath: leave the page
-	}
-	job_t previous = list_history[--list_history_len];
-	have_current_list = true;
-	current_list_job = previous;
-	page_more = false;
-	page_loading = false;
-	start_worker();
-	busy_show();
-	submit(&previous);
-	return true;
-}
-
 static void run(const job_t *job) {
-	if (job_is_list(job->kind)) {
-		// Re-reading the SAME list is not a step forward: the whole job is
-		// compared, not just its kind.
-		bool same = have_current_list && current_list_job.kind == job->kind &&
-					strcmp(current_list_job.id, job->id) == 0 && strcmp(current_list_job.text, job->text) == 0;
-		if (have_current_list && !same && lv_screen_active() == list_screen && list_history_len < LIST_HISTORY_DEPTH) {
-			list_history[list_history_len++] = current_list_job;
-		} else if (lv_screen_active() != list_screen) {
-			list_history_len = 0; // entering from outside: the history restarts
-		}
-		current_list_job = *job;
-		have_current_list = true;
-		page_more = false;
-		page_loading = false;
-	}
-
 	start_worker();
-	if (job->kind != JOB_PLAY) {
+	// No veil for playback or a star: the music starts right away, and a star
+	// is not worth a pause.
+	if (job->kind != JOB_PLAY && job->kind != JOB_STAR) {
 		busy_show();
 	}
 	submit(job);
 }
 
-// Another page when scrolling nears the bottom. No veil and no history entry:
-// it is the SAME list continuing, and the rows already there stay usable.
-static void maybe_load_more(void) {
-	if (page_loading || !page_more) {
-		return;
-	}
-	if (lv_screen_active() != list_screen || !have_current_list || !job_is_list(current_list_job.kind)) {
-		return;
-	}
-	// A sideways drag (back, or the player sheet) also moves this list.
-	if (player_sheet_drag_active() || switcher_back_drag_active()) {
-		return;
-	}
-	if (lv_obj_get_scroll_bottom(list_container) > lv_obj_get_height(list_container)) {
-		return;
-	}
-	page_loading = true;
-	job_t job = current_list_job;
-	job.offset = result_count;
-	start_worker();
-	submit(&job);
+// ---------------------------------------------------------------------------
+// the library on the card
+// ---------------------------------------------------------------------------
+
+#define RESYNC_AFTER_SECS (12 * 60 * 60)
+
+static bool wifi_is_connected(void) {
+#ifdef HOST_BUILD
+	// The simulator runs on a machine that has a network but no wlan0.
+	return true;
+#else
+	wifi_status_t status;
+	wifi_get_status(&status);
+	return status.state == WIFI_STATE_CONNECTED && status.ip[0] != '\0';
+#endif
 }
 
-static void list_scrolled_cb(lv_event_t *e) {
+// Reads the server's songs, when they have not been read lately.
+static void maybe_sync(bool force) {
+	if (!subsonic_logged_in() || !sdb_ready() || sdb_sync_running() || !wifi_is_connected()) {
+		return;
+	}
+	long last = sdb_last_sync();
+	if (force || last == 0 || sdb_total() <= 0 || (long)time(NULL) - last > RESYNC_AFTER_SECS) {
+		sdb_sync_start();
+	}
+}
+
+static lv_obj_t *home_container;
+static lv_obj_t *settings_btn;
+static lv_obj_t *search_btn;
+static lv_obj_t *sync_value;
+static lv_timer_t *sync_timer;
+
+static void sync_value_refresh(void) {
+	if (!sync_value) {
+		return;
+	}
+	char text[96];
+	if (sdb_sync_running()) {
+		snprintf(text, sizeof(text), "%d", sdb_sync_found());
+	} else {
+		int total = sdb_total();
+		snprintf(text, sizeof(text), "%d", total < 0 ? 0 : total);
+	}
+	lv_label_set_text(sync_value, text);
+}
+
+static void sync_done_async(void *user) {
+	bool ok = (bool)(intptr_t)user;
+	if (sync_timer) {
+		lv_timer_pause(sync_timer);
+	}
+	if (!ok && sdb_sync_error()[0]) {
+		gui_notify_popup(sdb_sync_error());
+	}
+	if (lv_screen_active() == subsonic_screen) {
+		rebuild_home();
+	} else if (lv_screen_active() == list_screen) {
+		view_refresh();
+	}
+}
+
+static void on_sync_done(bool ok) { gui_post(sync_done_async, (void *)(intptr_t)ok); }
+
+static void sync_tick_cb(lv_timer_t *timer) {
+	(void)timer;
+	sync_value_refresh();
+}
+
+static void update_library_cb(lv_event_t *e) {
 	(void)e;
-	maybe_load_more();
+	if (!sdb_ready()) {
+		gui_notify_popup("download_no_card");
+		return;
+	}
+	if (!wifi_is_connected()) {
+		gui_notify_popup("enable_wi_fi_first");
+		return;
+	}
+	if (sdb_sync_start()) {
+		lv_timer_resume(sync_timer);
+		sync_value_refresh();
+	}
 }
 
 // ---------------------------------------------------------------------------
-// taps
+// what comes back from the worker, on the GUI thread
 // ---------------------------------------------------------------------------
 
-static void row_clicked_cb(lv_event_t *e) {
-	// A gesture that ends over a row is not a tap on the row: events bubble, so
-	// the click that closes a drag arrives here too.
-	if (switcher_back_drag_active() || player_sheet_drag_active()) {
-		return;
-	}
-	int index = (int)(intptr_t)lv_event_get_user_data(e);
-	if (index < 0 || index >= result_count) {
+static void job_done_cb(void *user) {
+	(void)user;
+	busy_hide();
+
+	if (result_error[0]) {
+		gui_notify_popup(result_error);
 		return;
 	}
 
-	job_t job = {0};
-	switch (list_kind) {
-	case JOB_ALBUM_TRACKS:
-	case JOB_PLAYLIST_TRACKS:
-	case JOB_STARRED:
-	case JOB_SEARCH_TRACKS:
-		job.kind = JOB_PLAY;
-		job.index = index;
-		run(&job);
-		return;
-
-	case JOB_ARTIST_ALBUMS:
-	case JOB_ALBUMS_NEWEST:
-	case JOB_ALBUMS_AZ:
-	case JOB_ALBUMS_FREQUENT:
-	case JOB_ALBUMS_RANDOM:
-	case JOB_SEARCH_ALBUMS:
-		job.kind = JOB_ALBUM_TRACKS;
-		snprintf(job.id, sizeof(job.id), "%s", result_albums[index].id);
-		snprintf(job.text, sizeof(job.text), "%s", result_albums[index].title);
-		run(&job);
-		return;
-
-	case JOB_ARTISTS:
-	case JOB_SEARCH_ARTISTS:
-		job.kind = JOB_ARTIST_ALBUMS;
-		snprintf(job.id, sizeof(job.id), "%s", result_artists[index].id);
-		snprintf(job.text, sizeof(job.text), "%s", result_artists[index].name);
-		run(&job);
-		return;
+	switch (result_kind) {
+	case JOB_LOGIN:
+		sdb_open(card_root());
+		rebuild_home();
+		switch_screen(subsonic_screen);
+		toast_success("signed_in");
+		maybe_sync(true);
+		if (sdb_sync_running()) {
+			lv_timer_resume(sync_timer);
+		}
+		break;
 
 	case JOB_PLAYLISTS:
-		job.kind = JOB_PLAYLIST_TRACKS;
-		snprintf(job.id, sizeof(job.id), "%s", result_playlists[index].id);
-		snprintf(job.text, sizeof(job.text), "%s", result_playlists[index].name);
-		run(&job);
-		return;
+	case JOB_PLAYLIST_SONGS:
+		open_view(&result_view, result_push);
+		break;
+
+	case JOB_STAR:
+		if (lv_screen_active() == list_screen) {
+			view_refresh();
+		}
+		break;
 
 	default:
-		return;
+		break;
 	}
 }
 
@@ -1064,22 +1547,6 @@ static void row_clicked_cb(lv_event_t *e) {
 static lv_obj_t *search_field;
 static lv_obj_t *search_clear_btn;
 static keyboard_t *search_keyboard;
-static int search_kind_index; // 0 tracks, 1 albums, 2 artists
-static lv_obj_t *search_pills[3];
-
-static void paint_search_pills(void) {
-	for (int i = 0; i < 3; i++) {
-		bool on = i == search_kind_index;
-		lv_obj_set_style_bg_color(search_pills[i], on ? theme()->accent : theme()->surface_pressed, 0);
-		lv_obj_set_style_text_color(lv_obj_get_child(search_pills[i], 0), on ? lv_color_white() : theme()->text_primary,
-									0);
-	}
-}
-
-static void search_pill_cb(lv_event_t *e) {
-	search_kind_index = (int)(intptr_t)lv_event_get_user_data(e);
-	paint_search_pills();
-}
 
 static void refresh_search_clear(void) {
 	if (!search_clear_btn) {
@@ -1109,11 +1576,10 @@ static void search_accept_cb(lv_event_t *e) {
 	if (!text || !*text) {
 		return;
 	}
-	job_t job = {0};
-	job.kind = search_kind_index == 1 ? JOB_SEARCH_ALBUMS
-									  : (search_kind_index == 2 ? JOB_SEARCH_ARTISTS : JOB_SEARCH_TRACKS);
-	snprintf(job.text, sizeof(job.text), "%s", text);
-	run(&job);
+	char query[SUBSONIC_ID_MAX];
+	snprintf(query, sizeof(query), "%s", text);
+	history_len = 0; // a search is a start, not a step
+	open_songs(SDB_SONGS_SEARCH, query, query);
 }
 
 static void open_search_cb(lv_event_t *e) {
@@ -1167,28 +1633,9 @@ static void build_search_page(gui_config_t *cfg) {
 
 	lv_obj_set_style_pad_right(search_field, 60, 0);
 
-	static const char *const KINDS[] = {"tracks_2", "albums", "artists"};
-	for (int i = 0; i < 3; i++) {
-		lv_obj_t *pill = lv_btn_create(search_screen);
-		lv_obj_set_size(pill, 140, 52);
-		lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
-		lv_obj_set_style_shadow_width(pill, 0, 0);
-		lv_obj_set_style_border_width(pill, 0, 0);
-		lv_obj_align(pill, LV_ALIGN_TOP_LEFT, cfg->padding + i * 150, top + 78);
-		lv_obj_add_event_cb(pill, search_pill_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-
-		lv_obj_t *label = lv_label_create(pill);
-		lv_label_set_text(label, tr(KINDS[i]));
-		lv_obj_set_style_text_font(label, &font_ui_20, 0);
-		lv_obj_center(label);
-		search_pills[i] = pill;
-	}
-	paint_search_pills();
-
 	search_keyboard = keyboard_create(search_screen, cfg->screen_width, 316, search_field, NULL, "ok",
 									  search_accept_cb, NULL);
 	switcher_attach_back_gesture(search_screen);
-	theme_register_refresh(paint_search_pills);
 }
 
 // ---------------------------------------------------------------------------
@@ -1331,7 +1778,9 @@ static lv_obj_t *settings_info;
 static void do_logout(void *user) {
 	(void)user;
 	subsonic_logout();
-	// The tracks downloaded from that server are of no use to anyone.
+	// The tracks downloaded from that server are of no use to anyone. The list
+	// of songs goes when the next sign-in finds another server or user (see
+	// subsonicdb.h); for the same one it is still right.
 	subsoniccache_clear();
 	rebuild_home();
 	switch_screen(subsonic_screen);
@@ -1372,9 +1821,51 @@ static void build_settings_page(gui_config_t *cfg) {
 // the main page
 // ---------------------------------------------------------------------------
 
-static lv_obj_t *home_container;
-static lv_obj_t *settings_btn;
-static lv_obj_t *search_btn;
+typedef enum {
+	HOME_ALL,
+	HOME_ARTISTS,
+	HOME_ALBUMS,
+	HOME_GENRES,
+	HOME_STARRED,
+	HOME_RECENT,
+	HOME_PLAYLISTS,
+} home_row_t;
+
+static void home_row_cb(lv_event_t *e) {
+	if (switcher_back_drag_active()) {
+		return;
+	}
+	home_row_t row = (home_row_t)(intptr_t)lv_event_get_user_data(e);
+	history_len = 0;
+	view.kind = VIEW_NONE;
+	switch (row) {
+	case HOME_ALL:
+		open_songs(SDB_SONGS_ALL, NULL, tr("music_all_tracks"));
+		break;
+	case HOME_ARTISTS:
+		open_names(SDB_NAMES_ARTISTS, tr("artists"));
+		break;
+	case HOME_ALBUMS:
+		open_names(SDB_NAMES_ALBUMS, tr("albums"));
+		break;
+	case HOME_GENRES:
+		open_names(SDB_NAMES_GENRES, tr("music_genres"));
+		break;
+	case HOME_STARRED:
+		open_songs(SDB_SONGS_STARRED, NULL, tr("subsonic_starred_tracks"));
+		break;
+	case HOME_RECENT:
+		open_songs(SDB_SONGS_RECENT, NULL, tr("subsonic_recently_added"));
+		break;
+	case HOME_PLAYLISTS: {
+		job_t job = {0};
+		job.kind = JOB_PLAYLISTS;
+		job.push = true;
+		run(&job);
+		break;
+	}
+	}
+}
 
 static void update_corner_buttons(void) {
 	bool visible = subsonic_logged_in();
@@ -1406,97 +1897,143 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 	return button;
 }
 
-static void simple_job_cb(lv_event_t *e) {
-	job_t job = {0};
-	job.kind = (job_kind_t)(intptr_t)lv_event_get_user_data(e);
-	run(&job);
-}
-
 static void open_wifi_settings_cb(lv_event_t *e) {
 	(void)e;
 	switch_screen(wifisettings_screen);
 }
 
-// Whether the network is actually up. With no IP address every request ends in
-// a generic error that does not tell the user the one thing they need to know.
-static bool wifi_is_connected(void) {
-#ifdef HOST_BUILD
-	// The simulator runs on a machine that has a network but no wlan0.
-	return true;
-#else
-	wifi_status_t status;
-	wifi_get_status(&status);
-	return status.state == WIFI_STATE_CONNECTED && status.ip[0] != '\0';
-#endif
-}
+static void open_login_cb(lv_event_t *e);
 
 static void rebuild_home(void) {
 	lv_obj_clean(home_container);
+	sync_value = NULL;
 	update_corner_buttons();
 
-	if (!wifi_is_connected()) {
-		lv_obj_t *note = lv_label_create(home_container);
-		lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-		lv_obj_set_width(note, lv_pct(100));
-		lv_obj_add_style(note, &theme_style_text, 0);
-		lv_obj_set_style_text_font(note, &font_ui_22, 0);
-		lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
-		lv_obj_set_style_pad_hor(note, 4, 0);
-		lv_obj_set_style_pad_top(note, 14, 0);
-		lv_label_set_text(note, tr("enable_wi_fi_first"));
-		lv_obj_t *row = settingsrow_add(home_container, "wi_fi_settings", NULL, open_wifi_settings_cb, NULL);
-		lv_obj_set_style_margin_top(row, 16, 0);
-		return;
-	}
-
 	if (!subsonic_logged_in()) {
+		if (!wifi_is_connected()) {
+			lv_obj_t *note = lv_label_create(home_container);
+			lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+			lv_obj_set_width(note, lv_pct(100));
+			lv_obj_add_style(note, &theme_style_text, 0);
+			lv_obj_set_style_text_font(note, &font_ui_22, 0);
+			lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
+			lv_obj_set_style_pad_hor(note, 4, 0);
+			lv_obj_set_style_pad_top(note, 14, 0);
+			lv_label_set_text(note, tr("enable_wi_fi_first"));
+			lv_obj_t *row = settingsrow_add(home_container, "wi_fi_settings", NULL, open_wifi_settings_cb, NULL);
+			lv_obj_set_style_margin_top(row, 16, 0);
+			return;
+		}
 		settingsrow_add(home_container, "sign_in", NULL, open_login_cb, NULL);
 		return;
 	}
 
-	settingsrow_add(home_container, "artists", NULL, simple_job_cb, (void *)(intptr_t)JOB_ARTISTS);
-	settingsrow_add(home_container, "albums", NULL, simple_job_cb, (void *)(intptr_t)JOB_ALBUMS_AZ);
-	settingsrow_add(home_container, "subsonic_recently_added", NULL, simple_job_cb, (void *)(intptr_t)JOB_ALBUMS_NEWEST);
-	settingsrow_add(home_container, "subsonic_most_played", NULL, simple_job_cb, (void *)(intptr_t)JOB_ALBUMS_FREQUENT);
-	settingsrow_add(home_container, "subsonic_random_albums", NULL, simple_job_cb, (void *)(intptr_t)JOB_ALBUMS_RANDOM);
-	settingsrow_add(home_container, "playlists", NULL, simple_job_cb, (void *)(intptr_t)JOB_PLAYLISTS);
-	settingsrow_add(home_container, "subsonic_starred_tracks", NULL, simple_job_cb, (void *)(intptr_t)JOB_STARRED);
+	char count[24];
+	int total = sdb_total();
+	snprintf(count, sizeof(count), "%d", total < 0 ? 0 : total);
+
+	lv_obj_t *value = NULL;
+	settingsrow_add(home_container, "music_all_tracks", &value, home_row_cb, (void *)(intptr_t)HOME_ALL);
+	if (value) {
+		lv_label_set_text(value, count);
+	}
+	settingsrow_add(home_container, "artists", NULL, home_row_cb, (void *)(intptr_t)HOME_ARTISTS);
+	settingsrow_add(home_container, "albums", NULL, home_row_cb, (void *)(intptr_t)HOME_ALBUMS);
+	settingsrow_add(home_container, "music_genres", NULL, home_row_cb, (void *)(intptr_t)HOME_GENRES);
+	settingsrow_add(home_container, "subsonic_starred_tracks", NULL, home_row_cb, (void *)(intptr_t)HOME_STARRED);
+	settingsrow_add(home_container, "subsonic_recently_added", NULL, home_row_cb, (void *)(intptr_t)HOME_RECENT);
+	settingsrow_add(home_container, "playlists", NULL, home_row_cb, (void *)(intptr_t)HOME_PLAYLISTS);
+	settingsrow_add(home_container, "subsonic_update_library", &sync_value, update_library_cb, NULL);
+	sync_value_refresh();
 }
 
 static void home_loaded_cb(lv_event_t *e) {
 	(void)e;
 	// The card may have been put in or taken out since the page was built, and
-	// without one there is nowhere to download to.
-	subsoniccache_set_root(storage_sd_root());
+	// without one there is nowhere to download to or keep the songs.
+	subsoniccache_set_root(card_root());
+	if (!sdb_ready()) {
+		sdb_open(card_root());
+	}
 
-	// Rebuilt on every open: the network and the sign-in can change while the
-	// user is elsewhere.
+	// Rebuilt on every open: the network, the sign-in and the songs can change
+	// while the user is elsewhere.
 	rebuild_home();
+	maybe_sync(false);
+	if (sdb_sync_running()) {
+		lv_timer_resume(sync_timer);
+	}
 }
 
 static void build_list_page(gui_config_t *cfg) {
 	list_screen = lv_obj_create(NULL);
-	list_container = settingsrow_page(list_screen, cfg, "subsonic");
-	list_title = settingsrow_page_title(list_screen);
+	lv_obj_add_style(list_screen, &theme_style_screen, 0);
+	lv_obj_add_event_cb(list_screen, list_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
+	lv_obj_add_event_cb(list_screen, list_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
+
+	list_title = settingsrow_title(list_screen, cfg, "subsonic");
+	int content_top = settingsrow_content_top(cfg);
+
+	lv_obj_t *screen_container = lv_obj_create(list_screen);
+	lv_obj_set_size(screen_container, lv_pct(100), cfg->screen_height - content_top);
+	lv_obj_align(screen_container, LV_ALIGN_TOP_LEFT, 0, content_top);
+	lv_obj_set_style_bg_opa(screen_container, 0, 0);
+	lv_obj_set_style_border_width(screen_container, 0, 0);
+	lv_obj_set_style_pad_all(screen_container, 0, 0);
+	lv_obj_set_style_radius(screen_container, 0, 0);
+	lv_obj_set_flex_flow(screen_container, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_scrollable(screen_container, false);
+
+	// The viewport scrolls; nothing inside it is laid out by LVGL, because the
+	// rows are positioned by hand from the scroll offset.
+	list_viewport = lv_obj_create(screen_container);
+	lv_obj_set_width(list_viewport, lv_pct(100));
+	lv_obj_set_style_bg_opa(list_viewport, 0, 0);
+	lv_obj_set_style_border_width(list_viewport, 0, 0);
+	lv_obj_set_style_radius(list_viewport, 0, 0);
+	lv_obj_set_style_pad_hor(list_viewport, cfg->padding, 0);
+	lv_obj_set_style_pad_ver(list_viewport, 0, 0);
+	lv_obj_set_flex_grow(list_viewport, 1);
+	lv_obj_set_scroll_dir(list_viewport, LV_DIR_VER);
+	lv_obj_add_event_cb(list_viewport, list_scrolled_cb, LV_EVENT_SCROLL, NULL);
+
+	// As tall as the entire list: what gives the viewport something to scroll
+	// over. The rows inside it are the only widgets that exist.
+	list_body = lv_obj_create(list_viewport);
+	lv_obj_set_width(list_body, lv_pct(100));
+	lv_obj_set_height(list_body, ROW_PITCH);
+	lv_obj_set_style_bg_opa(list_body, 0, 0);
+	lv_obj_set_style_border_width(list_body, 0, 0);
+	lv_obj_set_style_pad_all(list_body, 0, 0);
+	lv_obj_set_scrollable(list_body, false);
+	lv_obj_set_event_bubble(list_body, true);
+
+	build_rows(cfg->screen_width - 2 * cfg->padding);
 
 	list_empty = lv_label_create(list_screen);
-	lv_label_set_text(list_empty, tr("no_results"));
+	lv_label_set_long_mode(list_empty, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(list_empty, cfg->screen_width - 4 * cfg->padding);
 	lv_obj_set_style_text_align(list_empty, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(list_empty, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(list_empty, &font_ui_24, 0);
-	lv_obj_align(list_empty, LV_ALIGN_TOP_MID, 0, settingsrow_content_top(cfg) + 100);
+	lv_obj_set_style_text_font(list_empty, &font_ui_22, 0);
+	lv_obj_align(list_empty, LV_ALIGN_TOP_MID, 0, content_top + 100);
 	lv_obj_set_hidden(list_empty, true);
 
-	lv_obj_add_event_cb(list_container, list_scrolled_cb, LV_EVENT_SCROLL, NULL);
+	az = azindex_create(list_screen, cfg, list_viewport, ROW_PITCH, az_jumped);
+
 	switcher_attach_back_gesture(list_screen);
 	switcher_set_back_guard(list_screen, list_back_guard);
 	switcher_set_back_guard_peek(list_screen, list_back_has_step);
 	// The leftward drag that pulls in the player sheet, as on every browsable page.
 	player_sheet_attach_drag(list_screen, true);
-	player_sheet_attach_drag(list_container, true);
+	player_sheet_attach_drag(list_viewport, true);
+
+	mark_timer = lv_timer_create(mark_tick_cb, 1000, NULL);
+	lv_timer_pause(mark_timer);
 }
 
 void subsonicpage_init(gui_config_t *cfg) {
+	g_cfg = cfg;
 	subsonic_screen = lv_obj_create(NULL);
 	home_container = settingsrow_page(subsonic_screen, cfg, "subsonic");
 
@@ -1516,8 +2053,12 @@ void subsonicpage_init(gui_config_t *cfg) {
 
 	// The queue watchdog: tells the prefetch thread which track is missing next.
 	lv_timer_create(queue_watch_cb, 1000, NULL);
+	sync_timer = lv_timer_create(sync_tick_cb, 1000, NULL);
+	lv_timer_pause(sync_timer);
+	sdb_set_sync_listener(on_sync_done);
 
-	subsoniccache_set_root(storage_sd_root());
+	subsoniccache_set_root(card_root());
+	sdb_open(card_root());
 	rebuild_home();
 
 	lv_obj_add_event_cb(subsonic_screen, home_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);

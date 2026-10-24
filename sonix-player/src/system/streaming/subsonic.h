@@ -38,6 +38,18 @@ typedef struct {
 	int bitrate;	 // kbit/s, 0 when the server does not say
 	int bit_depth;	 // 0 when the server does not say
 	int sample_rate; // Hz, 0 when the server does not say
+	char album_artist[SUBSONIC_NAME_MAX];
+	bool starred; // the server has it starred
+	char genre[64];
+	int year;
+	int disc;
+	// ReplayGain as the server read it from the file; has_gain is false when it
+	// sent none. Gains are in dB.
+	bool has_gain;
+	float track_gain;
+	float album_gain;
+	float track_peak;
+	float album_peak;
 } subsonic_track_t;
 
 typedef struct {
@@ -113,6 +125,17 @@ int subsonic_starred_tracks(int offset, subsonic_track_t *out, int max);
 int subsonic_search_tracks(const char *query, int offset, subsonic_track_t *out, int max);
 int subsonic_search_albums(const char *query, int offset, subsonic_album_t *out, int max);
 int subsonic_search_artists(const char *query, int offset, subsonic_artist_t *out, int max);
+
+// ---------------------------------------------------------------------------
+// Writing back
+// ---------------------------------------------------------------------------
+
+// Stars or unstars a track on the server.
+bool subsonic_star(const char *track_id, bool on);
+
+// Tells the server a track was played, which is what its play counts and its
+// own Last.fm scrobbling run on.
+bool subsonic_scrobble(const char *track_id);
 
 // ---------------------------------------------------------------------------
 // Addresses

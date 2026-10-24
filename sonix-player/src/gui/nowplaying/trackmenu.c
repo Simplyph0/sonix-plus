@@ -13,6 +13,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/library/playlistpage.h"
 #include "src/gui/streaming/qobuzpage.h"
+#include "src/gui/streaming/subsonicpage.h"
 #include "src/gui/streaming/tidalpage.h"
 #include "src/gui/shell/popover.h"
 #include "src/gui/settings/musicsettings.h"
@@ -32,6 +33,7 @@
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/subsoniccache.h"
 #include "src/system/library/library.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/core/utils.h"
@@ -1502,7 +1504,7 @@ static void details_fill(const char *file, const song_metadata_t *tags, int bits
 	// duration, which is how dense the file is. Lossy files already carry it in
 	// the row above, and for a streamed track the cache file may be half
 	// downloaded, making the number meaningless.
-	if (!lossy && !qobuzcache_owns(file) && !tidalcache_owns(file) && duration_secs > 0.5) {
+	if (!lossy && !qobuzcache_owns(file) && !tidalcache_owns(file) && !subsoniccache_owns(file) && duration_secs > 0.5) {
 		struct stat st_kbps;
 		if (stat(file, &st_kbps) == 0 && st_kbps.st_size > 0) {
 			int avg = (int)((double)st_kbps.st_size * 8.0 / duration_secs / 1000.0 + 0.5);
@@ -1532,7 +1534,7 @@ static void details_fill(const char *file, const song_metadata_t *tags, int bits
 	// which may still be downloading -- a number that grows on screen by itself
 	// and describes the download, not the track.
 	struct stat st;
-	if (!qobuzcache_owns(file) && !tidalcache_owns(file) && stat(file, &st) == 0) {
+	if (!qobuzcache_owns(file) && !tidalcache_owns(file) && !subsoniccache_owns(file) && stat(file, &st) == 0) {
 		snprintf(buffer, sizeof(buffer), "%.1f MB", st.st_size / (1024.0 * 1024.0));
 		details_add_row("trackmenu_size", buffer);
 	}
@@ -1544,6 +1546,8 @@ static void details_fill(const char *file, const song_metadata_t *tags, int bits
 		details_add_row("trackmenu_source", "qobuz");
 	} else if (tidalcache_owns(file)) {
 		details_add_row("trackmenu_source", "tidal");
+	} else if (subsoniccache_owns(file)) {
+		details_add_row("trackmenu_source", "subsonic");
 	} else {
 		details_add_row("trackmenu_file", details_card_path(file));
 	}
@@ -1613,6 +1617,7 @@ static void details_rebuild(void) {
 	// average, but only for a local file -- a streamed one may still be half
 	// downloaded and the number would climb by itself.
 	if (lossy && kbps <= 0 && !qobuzcache_owns(state.current_file) && !tidalcache_owns(state.current_file) &&
+		!subsoniccache_owns(state.current_file) &&
 		state.progress_total_secs > 0.5) {
 		struct stat st_lossy;
 		if (stat(state.current_file, &st_lossy) == 0 && st_lossy.st_size > 0) {
@@ -1783,6 +1788,18 @@ static void open_album_cb(void *user) {
 			return;
 		}
 		switcher_set_player_return(tidal_list_screen);
+		return;
+	}
+
+	// And for a song from the Subsonic server.
+	char subsonic_album[SUBSONIC_ID_MAX];
+	if (subsoniccache_album_id(state.current_file, subsonic_album, sizeof(subsonic_album))) {
+		player_sheet_close(false);
+		if (!subsonicpage_open_album(subsonic_album, state.metadata.album)) {
+			gui_notify_popup("trackmenu_no_album");
+			return;
+		}
+		switcher_set_player_return(subsonic_list_screen);
 		return;
 	}
 

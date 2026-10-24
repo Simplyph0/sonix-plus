@@ -100,8 +100,13 @@ This is everything Sonix Player can do today, on both the **R1** and the **R3 Pr
 
 - **Tidal** - sign in with the code on screen or the QR code. Low, High, CD and Hi-Res quality. Search, albums, artists, playlists, favourites, new releases, most streamed and recommended. You can add and remove favourites and manage your playlists from the player.
 - **Qobuz** - sign in with your account. MP3 320, FLAC 16/44.1, 24/96 and 24/192. Search, albums, artists, playlists, favourites and new releases. You can add and remove favourites and manage your playlists from the player.
-- **Subsonic** - your own server: Navidrome, Airsonic, Gonic and the others that speak the Subsonic API. Sign in with its address, a user name and a password; only a salted token is kept on the player, never the password. Browse artists, albums (A-Z, recently added, most played, random), playlists and starred tracks, and search. Tracks are played as the server has them, never transcoded, and start while they download.
-  > Reading only: starring, playlists and the play count are not written back to the server.
+- **Subsonic** - your own server: Navidrome, Airsonic, Gonic and the others that speak the Subsonic API. Sign in with its address, a user name and a password; only a salted token is kept on the player, never the password.
+  - **Your whole collection on the player** - the songs are read from the server into a list kept on the card, so **All tracks**, **Artists**, **Albums**, **Genres**, **Starred tracks** and **Recently added** open at once, sorted like the local library, with the **A-Z bar** and a search over titles, artists and albums. It is brought up to date when you open the page after half a day, or with **Update library**.
+  - **The server's playlists** are listed and played too.
+  - **Long press a song** to add it to the queue, play it next, star it, add it to a playlist, or go to its album or artist.
+  - **Stars** are the server's: the star in Now Playing and in the Control centre stars the song there, and the stars you gave elsewhere show here. Plays are reported to the server.
+  - **Play** - songs are played as the server has them, never transcoded, and start while they download; the next two are fetched ahead. The sound settings apply as they do to any other track, and the server's ReplayGain tags are used.
+  > What you still cannot do from the player: edit server playlists, or select several songs at once.
 - **Radio** - thousands of stations by country, language or genre, plus search, favourites and recently played. MP3, AAC and FLAC stations.
   > **My stations** - write your own list in a `radio.txt` file in the root of the card, one station per line: `name, address`.
 - **Last.fm** - scrobbles what you listen to. Without Wi-Fi the plays are kept and sent the next time the player connects.

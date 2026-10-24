@@ -319,6 +319,22 @@ static void fill_track(const json_doc_t *doc, int obj, subsonic_track_t *t) {
 	t->bit_depth = (int)json_obj_long(doc, obj, "bitDepth", 0);
 	t->sample_rate = (int)json_obj_long(doc, obj, "samplingRate", 0);
 
+	t->starred = json_get(doc, obj, "starred") >= 0;
+	read_text(doc, obj, "genre", t->genre, sizeof(t->genre));
+	read_text(doc, obj, "albumArtist", t->album_artist, sizeof(t->album_artist));
+	t->year = (int)json_obj_long(doc, obj, "year", 0);
+	t->disc = (int)json_obj_long(doc, obj, "discNumber", 0);
+	int gain = json_get(doc, obj, "replayGain");
+	if (gain >= 0) {
+		int track_gain = json_get(doc, gain, "trackGain");
+		int album_gain = json_get(doc, gain, "albumGain");
+		t->has_gain = track_gain >= 0 || album_gain >= 0;
+		t->track_gain = (float)json_double(doc, track_gain, 0.0);
+		t->album_gain = (float)json_double(doc, album_gain, 0.0);
+		t->track_peak = (float)json_double(doc, json_get(doc, gain, "trackPeak"), 0.0);
+		t->album_peak = (float)json_double(doc, json_get(doc, gain, "albumPeak"), 0.0);
+	}
+
 	// The decoder is picked from the file's extension, so one has to be there
 	// even when the server omits the suffix.
 	if (!t->suffix[0]) {
@@ -572,6 +588,36 @@ int subsonic_search_albums(const char *query, int offset, subsonic_album_t *out,
 
 int subsonic_search_artists(const char *query, int offset, subsonic_artist_t *out, int max) {
 	return search(query, offset, max, "artist", out, sizeof(*out), fill_artist_v);
+}
+
+// ---------------------------------------------------------------------------
+// writing back
+// ---------------------------------------------------------------------------
+
+static bool simple_call(const char *method, const char *args) {
+	char *body;
+	json_doc_t doc;
+	int response;
+	if (!api_call(method, args, &body, &doc, &response)) {
+		return false;
+	}
+	json_free(&doc);
+	free(body);
+	return true;
+}
+
+bool subsonic_star(const char *track_id, bool on) {
+	char args[3 * SUBSONIC_ID_MAX + 8];
+	arg_text(args, sizeof(args), "id", track_id);
+	return simple_call(on ? "star" : "unstar", args);
+}
+
+bool subsonic_scrobble(const char *track_id) {
+	char id[3 * SUBSONIC_ID_MAX + 8];
+	arg_text(id, sizeof(id), "id", track_id);
+	char args[3 * SUBSONIC_ID_MAX + 40];
+	snprintf(args, sizeof(args), "%s&submission=true", id);
+	return simple_call("scrobble", args);
 }
 
 // ---------------------------------------------------------------------------

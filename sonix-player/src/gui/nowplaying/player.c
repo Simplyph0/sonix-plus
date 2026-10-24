@@ -51,6 +51,8 @@
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/qobuzsync.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/subsoniccache.h"
+#include "src/system/streaming/subsonicdb.h"
 #include "src/system/streaming/tidalsync.h"
 #include "src/system/core/utils.h"
 #include "src/system/audio/waveform.h"
@@ -1228,7 +1230,7 @@ static bool playing_local_file(const device_state_t *state) {
 		return false;
 	}
 	const char *f = state->current_file;
-	return !qobuzcache_owns(f) && !tidalcache_owns(f) && !podcastcache_is_episode(f) && !dlna_owns_path(f) &&
+	return !qobuzcache_owns(f) && !tidalcache_owns(f) && !subsoniccache_owns(f) && !podcastcache_is_episode(f) && !dlna_owns_path(f) &&
 		   !dlna_owns_playback();
 }
 
@@ -3684,6 +3686,12 @@ bool player_current_podcast_feed(long long *id_out, podcast_feed_t *feed_out) {
 // service": the two caches live in different directories, so a path can answer
 // yes to at most one, which makes it impossible by construction for the player
 // to believe a track comes from both.
+static bool current_subsonic_track(void) {
+	device_state_t state;
+	device_state_get(&state);
+	return state.current_file[0] && subsoniccache_owns(state.current_file);
+}
+
 static long current_tidal_track(void) {
 	device_state_t state;
 	device_state_get(&state);
@@ -3763,6 +3771,12 @@ static void update_fav_button(void) {
 	} else if ((tidal_id = current_tidal_track()) > 0) {
 		starred = tidalsync_is_favorite(tidal_id);
 		tidalsync_favorites_refresh(tidal_favorites_changed);
+	} else if (current_subsonic_track()) {
+		// A song from the Subsonic server: starred there, as the server's
+		// own apps show it.
+		device_state_t state;
+		device_state_get(&state);
+		starred = sdb_path_starred(state.current_file);
 	} else {
 		// device_state, not audio_get_current_file(): the star is drawn from
 		// one source and toggled from another, and when the two disagreed the
@@ -3816,6 +3830,12 @@ static void tidal_fav_done(bool ok, const char *error, void *user) {
 	gui_post(fav_error_async, NULL);
 }
 
+static void subsonic_fav_done(bool ok, const char *error, void *user) {
+	(void)user;
+	snprintf(fav_error, sizeof(fav_error), "%s", ok ? "" : (error && error[0] ? error : tr("subsonic_cannot_reach")));
+	gui_post(fav_error_async, NULL);
+}
+
 static void fav_btn_event_cb(lv_event_t *e) {
 	(void)e;
 
@@ -3866,6 +3886,12 @@ static void fav_btn_event_cb(lv_event_t *e) {
 		bool want = !tidalsync_is_favorite(tidal_id);
 		tidalsync_favorite_toggle(tidal_id, want, tidal_fav_done, NULL);
 		update_fav_button();
+		return;
+	}
+
+	if (subsoniccache_owns(state.current_file)) {
+		sdb_path_toggle_star(state.current_file, subsonic_fav_done, NULL);
+		update_fav_button(); // the change shows at once, and is taken back if refused
 		return;
 	}
 
@@ -3970,6 +3996,7 @@ static void update_format_label(const device_state_t *state) {
 		// finished, for the reason just given.
 		struct stat st;
 		if (kbps <= 0 && !qobuzcache_owns(state->current_file) && !tidalcache_owns(state->current_file) &&
+			!subsoniccache_owns(state->current_file) &&
 			state->progress_total_secs > 0.5 && stat(state->current_file, &st) == 0 && st.st_size > 0) {
 			kbps = (int)((double)st.st_size * 8.0 / state->progress_total_secs / 1000.0 + 0.5);
 		}

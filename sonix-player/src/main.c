@@ -2198,7 +2198,6 @@ int main(int argc, char **argv) {
 	// rather than to the local database.
 	library_forget_under(qobuzcache_dir());
 	library_forget_under(tidalcache_dir());
-	library_forget_under(subsoniccache_dir());
 	if (!tls_available()) {
 		fprintf(stderr, "tls: unavailable; https radio stations cannot be opened\n");
 	}

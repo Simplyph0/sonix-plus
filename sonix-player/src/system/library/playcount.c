@@ -1,5 +1,7 @@
 #include "playcount.h"
 
+#include "src/system/streaming/subsonicdb.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -67,5 +69,6 @@ void playcount_note_playback(const playcount_playback_t *now) {
 	if (!play.counted && !play.skip && lastfm_play_counts(now->duration, play.listened)) {
 		play.counted = true;
 		library_note_play(play.file);
+		sdb_path_scrobble(play.file);
 	}
 }

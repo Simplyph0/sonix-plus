@@ -2371,6 +2371,18 @@ static void read_sidecar_tags(const char *filepath, song_metadata_t *out) {
 			out->disc_number = atoi(value);
 		} else if (strcmp(key, "year") == 0) {
 			out->year = atoi(value);
+		} else if (strcmp(key, "genre") == 0) {
+			snprintf(out->genre, sizeof(out->genre), "%s", value);
+		} else if (strcmp(key, "track_gain") == 0) {
+			out->track_gain_db = (float)atof(value);
+			out->has_track_gain = true;
+		} else if (strcmp(key, "album_gain") == 0) {
+			out->album_gain_db = (float)atof(value);
+			out->has_album_gain = true;
+		} else if (strcmp(key, "track_peak") == 0) {
+			out->track_peak = (float)atof(value);
+		} else if (strcmp(key, "album_peak") == 0) {
+			out->album_peak = (float)atof(value);
 		}
 	}
 	fclose(f);
