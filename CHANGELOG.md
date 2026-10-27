@@ -4,6 +4,11 @@ What changed in each release of this fork, newest first. The release page shows
 the section for its own tag, so write the section here before pushing the tag
 (see `.github/workflows/release-firmware.yml`).
 
+## v1.5 - 2026-10-27
+
+- Apps write a `last-run.log` in their folder, and a popup tells you when one stops on its own.
+- Steadier sound from apps: bigger buffer and a real-time audio thread.
+
 ## v1.4 - 2026-10-27
 
 - **Games** and **Emulators** folders in More: Flappy Bird, **Snake**, **2048** and **Breakout**, and the Game Boy.
