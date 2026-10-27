@@ -89,8 +89,8 @@ are apps you copy to the card:
 
 | App | Games go in | Get it |
 | --- | --- | --- |
-| [NES](https://github.com/Simplyph0/sonix-app-nes) | `Games/NES` | build it, or take the release |
-| [GBA](https://github.com/Simplyph0/sonix-app-gba) | `Games/GBA` | build it, or take the release |
+| [NES](https://github.com/Simplyph0/sonix-app-nes) | `Games/NES` | build it (below) |
+| [GBA](https://github.com/Simplyph0/sonix-app-gba) | `Games/GBA` | build it (below) |
 | [SNES](https://github.com/Simplyph0/sonix-app-snes) | `Games/SNES` | build it yourself: Snes9x is non-commercial, so no program is offered |
 
 1. Open **More > Games** or **More > Emulators** once with a card in. The player makes
@@ -102,8 +102,8 @@ are apps you copy to the card:
    **SAVE** and **LOAD** keep one save state per game, and **EXIT** (hold it for a moment)
    leaves. Battery saves go to `Saves/<system>/` on the card.
 
-Apps run as root, so install only ones you trust. If an emulator crashes the screen, hold the
-power button.
+Apps run as root, so install only ones you trust. If one hangs, the power menu should still restart
+the player, though I have not tried that with a hung app.
 
 **Writing an app**: an app is a folder with a `manifest.ini`, an icon and a MIPS program.
 [APPS.md](APPS.md) has the format and everything the player gives an app, and

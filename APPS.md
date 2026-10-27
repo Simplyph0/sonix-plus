@@ -107,7 +107,7 @@ exit when it is touched. When the program ends, the player takes the screen and 
 back, repaints, and ignores touches for a moment so that the finger that left the app does not land
 on a tile underneath. Anything the app left running in its process group is stopped.
 
-If an app hangs, the power button's long press still works.
+If an app hangs, the power menu should still restart the player (not tried with a hung app yet).
 
 ## Writing one
 
