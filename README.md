@@ -1,151 +1,83 @@
-﻿# Sonix Player
+# Sonix Plus
 
-A replacement player for the **HiBy R3 Pro II** and the **HiBy R1**, written on
-LVGL.
+My fork of **[Jepl4r/sonix-player](https://github.com/Jepl4r/sonix-player)**: a replacement player for
+the **HiBy R3 Pro II** and the **HiBy R1**, written on LVGL. Sonix Player is Jepl4r's work and I kept their
+history as it was. Both are under the GNU General Public License version 3 ([LICENSE](LICENSE)).
 
-Everything it can do is in **[FEATURES.md](FEATURES.md)**.
+Everything the player can do is in **[FEATURES.md](FEATURES.md)**, what changed in each release is in
+[CHANGELOG.md](CHANGELOG.md), and how to build it is in [BUILDING.md](BUILDING.md).
 
-> **AI disclaimer.** I wrote the features I added to this fork (the Calculator, the
-> Terminal, Subsonic, lyrics on streamed tracks and the release workflow) with the
-> help of an AI coding assistant, Claude by Anthropic. They build, and I have tried
-> some of them in the simulator, but they have had far less testing on real players
-> than the rest of Sonix Player. Flash at your own risk, and keep HiBy's original
-> firmware so you can go back (see below).
+> **AI disclaimer.** I wrote what I added to this fork (the Calculator, the Terminal, Subsonic, lyrics on
+> streamed tracks, the Games and Emulators folders, apps from the card with their SDK and the NES, GBA and
+> SNES apps, and the release workflow) with the help of an AI coding assistant, Claude by Anthropic. They
+> build, and I have run parts of them on a computer, but they have had far less testing on real players than
+> the rest of Sonix Player. Flash at your own risk, and keep HiBy's original firmware so you can go back.
 
-## About this fork
+## What I added
 
-This is my fork of **[Jepl4r/sonix-player](https://github.com/Jepl4r/sonix-player)**.
-Sonix Player is Jepl4r's work, and I have kept their history as it was. Both are
-under the GNU General Public License version 3 (see [LICENSE](LICENSE)).
-
-What I added, in the order I did it ([FEATURES.md](FEATURES.md) has the detail, and
-each release says what changed in it in [CHANGELOG.md](CHANGELOG.md)):
-
-- **Calculator** in More: the four operations, percent and sign, and a scientific
-  mode with brackets, memory, powers and roots, logarithms, trigonometry, factorial,
-  pi, e and a random number.
-- **Terminal** in More: a shell on the player, in colour, with text size and screen
-  width you can change. It uses DejaVu Sans Mono, and a `Terminal/font.ttf` on the
-  card replaces it.
-- **A Terminal folder on the card** (Developer options > Terminal binaries): programs
-  copied into `Terminal/bin` run from the Terminal and from an ADB shell.
-- **Terminal keys**: a row of keys above the keyboard with Tab completion, command
-  history, arrows and the symbols a soft keyboard hides.
-- **Subsonic** under Streaming: my own server (Navidrome, Airsonic, Gonic...) with
-  all the songs kept on the card, so All tracks, Artists, Albums, Genres, Starred
-  and search open at once, with server stars and play reporting.
+- **Calculator** in More, with a scientific mode.
+- **Terminal** in More: a shell in colour, with text size and screen width you can change, and a row of
+  keys for Tab completion, history, arrows and `| / ~ -`. Programs in `Terminal/bin` on the card run from
+  it and from an ADB shell.
+- **Games** in More: Flappy Bird, Snake, 2048 and Breakout. **Emulators** next to it: the Game Boy, and
+  **apps from the card**, such as NES, GBA and SNES.
+- **Subsonic** under Streaming: all your songs kept on the card, with server stars and play reporting.
 - **Lyrics on streamed tracks**, from the lyrics in the file.
-- **Games** in More: Flappy Bird, Snake, 2048 and Breakout.
-- **Emulators** in More: the Game Boy built in, and NES, GBA and SNES as apps from the card.
-- **Apps from the card**: a program in `Apps/<name>/` with a small `manifest.ini` shows up
-  as a tile in More, Games or Emulators, and gets the screen, the touch panel and the sound
-  while it runs. Nothing is linked into the player, so an app can have any licence
-  ([APPS.md](APPS.md); the SDK is [sonix-app-sdk](https://github.com/Simplyph0/sonix-app-sdk)).
-- **Firmware builds on GitHub**: a workflow that builds both images and publishes
-  them as a release.
-
-## Your own programs on the card
-
-The player's own filesystem is read-only, so programs you want to run in the
-Terminal (or in an ADB shell) live on the microSD card instead.
-
-1. On the player, tap "Build number" five times in Settings > System > About to
-   open Developer options, and switch on **Terminal binaries**.
-2. That makes a `Terminal` folder on the card:
-
-   ```
-   Terminal/
-   ├── bin/        copy programs here
-   ├── lib/        shared libraries those programs need
-   └── font.ttf    optional: a monospaced typeface for the Terminal
-   ```
-
-3. Copy a program into `bin`. It is first on the Terminal's PATH, so a file called
-   `fastfetch` in `bin` starts when you type `fastfetch`. The same folders are put
-   on the PATH of `adb shell`, so the programs run from there too.
-
-A program has to be built for the player: **32-bit little-endian MIPS (mipsel,
-MIPS32r2)**, either linked statically or against **glibc 2.22 or older**. Anything
-else will not start. Static is the easy way, and the MIPS toolchain that
-`make target` builds (`sonix-player/rockbox-toolchain`) makes them:
-
-```bash
-sonix-player/rockbox-toolchain/bin/mipsel-rockbox-linux-gnu-gcc -O2 -march=mips32r2 -static hello.c -o hello
-```
-
-The card is FAT, but it is mounted with the execute bits on, so a copied program
-runs as it is. Programs that draw the whole screen and read single keys (vi, top)
-do not work yet: the Terminal sends a line at a time.
-
-## Games, emulators and apps
-
-**More** holds two folders: **Games** and **Emulators**. Both also list apps from the card.
-
-**Games** (built in): Flappy Bird, Snake (swipe to steer), 2048 (swipe to slide) and Breakout
-(slide a finger to move the paddle, tap to serve). Each keeps its best score.
-
-**Emulators**: the Game Boy is built in (ROMs in `Games/GB` and `Games/GBC`). NES, GBA and SNES
-are apps you copy to the card:
-
-| App | Games go in | Get it |
-| --- | --- | --- |
-| [NES](https://github.com/Simplyph0/sonix-app-nes) | `Games/NES` | build it (below) |
-| [GBA](https://github.com/Simplyph0/sonix-app-gba) | `Games/GBA` | build it (below) |
-| [SNES](https://github.com/Simplyph0/sonix-app-snes) | `Games/SNES` | build it yourself: Snes9x is non-commercial, so no program is offered |
-
-1. Open **More > Games** or **More > Emulators** once with a card in. The player makes
-   `Apps/` on the card.
-2. Copy an app's folder (for example `NES`) into `Apps/`. Delete the folder to remove it.
-3. Copy your games into the folder named above. The player makes the folder when you
-   first open the app, so you can see where to put them.
-4. Open the app and tap a game. The emulator shows the game on top and a pad below it.
-   **SAVE** and **LOAD** keep one save state per game, and **EXIT** (hold it for a moment)
-   leaves. Battery saves go to `Saves/<system>/` on the card.
-
-Apps run as root, so install only ones you trust. If one hangs, the power menu should still restart
-the player, though I have not tried that with a hung app.
-
-**Writing an app**: an app is a folder with a `manifest.ini`, an icon and a MIPS program.
-[APPS.md](APPS.md) has the format and everything the player gives an app, and
-[sonix-app-sdk](https://github.com/Simplyph0/sonix-app-sdk) has the header for screen, touch and
-sound, a libretro frontend, and examples.
-
-**Building apps from source**: each app repo has a Makefile. With the MIPS toolchain that
-`make target` builds (see [Building for the device](#building-for-the-device)):
-
-```bash
-make fetch
-make package CROSS=/path/to/sonix-player/rockbox-toolchain/bin/mipsel-rockbox-linux-gnu-
-```
-
-That makes `dist/<Name>/`, ready to copy to `Apps/`. `make host` builds one for your computer, and
-`python3 tools/mkrom.py` in each emulator repo writes a small test ROM.
+- **Firmware builds on GitHub**: a workflow that builds both images and publishes them as a release.
 
 ## Install
 
 1. Download the firmware for your player from the
-   **[latest release](https://github.com/Jepl4r/sonix-player/releases/latest)**:
-   `r3proii.upt` for the R3 Pro II, `r1.upt` for the R1. **Never the other
-   one**: the update does not check which player it is given.
+   **[latest release](https://github.com/Simplyph0/sonix-plus/releases/latest)**: `r3proii.upt` for the
+   R3 Pro II, `r1.upt` for the R1. **Never the other one**: the update does not check which player it is given.
 2. Charge the player **above 30%**.
-3. Copy the `.upt` file to the **root of the microSD card** and put the card
-   in the player.
-4. Start the update:
-   - **from the stock firmware** - use its firmware update from the microSD
-     card.
-   - **from Sonix Player** - Settings > System > Update firmware > From SD
-     card.
-5. Let it flash: it says "Upgrading...", then "Succeeded", and reboots by
-   itself.
+3. Copy the `.upt` to the **root of the microSD card** and put the card in the player.
+4. Start the update, from the stock firmware (its firmware update from the microSD card) or from Sonix Player
+   (Settings > System > Update firmware > From SD card).
+5. Let it flash: "Upgrading...", then "Succeeded", and it reboots by itself.
 
-Once Sonix Player is installed, later versions can be installed straight from
-the player: Settings > System > Update firmware > Via internet downloads the
-right file from the latest release by itself.
+**Going back to HiBy's firmware:** flash the original from HiBy's website the same way.
 
-> **Going back to the stock firmware:** flash the original firmware from
-> HiBy's website the same way.
+> *Via internet* on Sonix Player's update page looks at the releases of the repository named in
+> `system-info.json` (`ota-repo`), which is still Jepl4r/sonix-player.
 
----
+## Games, emulators and apps
+
+**More** holds **Games** and **Emulators**. Games: Flappy Bird, Snake (swipe to steer), 2048 (swipe to slide)
+and Breakout (slide a finger, tap to serve), each with a best score. Emulators: the Game Boy is built in (ROMs
+in `Games/GB` and `Games/GBC`). The rest are **apps**: programs on the card that the player lists as tiles and
+gives the screen, the touch panel and the sound while they run.
+
+| App | Games go in | Get it |
+| --- | --- | --- |
+| [NES](https://github.com/Simplyph0/sonix-app-nes) | `Games/NES` | build it |
+| [GBA](https://github.com/Simplyph0/sonix-app-gba) | `Games/GBA` | build it |
+| [SNES](https://github.com/Simplyph0/sonix-app-snes) | `Games/SNES` | build it yourself: Snes9x is non-commercial, so no program is offered |
+
+1. Open **More > Games** or **More > Emulators** once with a card in. The player makes `Apps/` on the card.
+2. Copy an app's folder (for example `NES`) into `Apps/`. Delete the folder to remove it.
+3. Put games in the folder named above. The player makes it when you first open the app.
+4. Open the app and tap a game: the game is on top and a pad below. **SAVE** and **LOAD** keep one state per
+   game, **EXIT** (hold it a moment) leaves, and battery saves go to `Saves/<system>/` on the card.
+
+Apps run as root: install only ones you trust. To write one, see [APPS.md](APPS.md) and
+[sonix-app-sdk](https://github.com/Simplyph0/sonix-app-sdk). To build the ones above, each repo has a Makefile
+(`make fetch`, then `make package CROSS=<toolchain prefix>`) and needs the MIPS toolchain that `make target`
+builds ([BUILDING.md](BUILDING.md)).
+
+## Your own programs in the Terminal
+
+The player's filesystem is read-only, so programs for the Terminal (and `adb shell`) live on the card:
+
+1. Tap "Build number" five times in Settings > System > About, open Developer options and switch on
+   **Terminal binaries**. That makes `Terminal/bin` (programs), `Terminal/lib` (their shared libraries) and an
+   optional `Terminal/font.ttf` on the card.
+2. Copy a program into `bin`. It is first on the PATH, so a file called `fastfetch` starts when you type it.
+
+A program has to be **32-bit little-endian MIPS (mipsel, MIPS32r2)**, linked statically or against **glibc 2.22
+or older**. The toolchain from `make target` makes them:
+`rockbox-toolchain/bin/mipsel-rockbox-linux-gnu-gcc -O2 -march=mips32r2 -static hello.c -o hello`. Programs that
+draw the whole screen and read single keys (vi, top) do not work: the Terminal sends a line at a time.
 
 ## Supported players
 
@@ -166,520 +98,12 @@ into each image.
 | buttons | volume on the left flank, playback on the right | all on the right flank, one skip key |
 | firmware image | `r3proii.upt` | `r1.upt` |
 
-Each player only looks for its own image, and never offers the other's: the
-recovery system does not check what it is given.
-
-There are two builds from one tree:
-
-| | binary | runs on |
-|---|---|---|
-| **host** | `sonix_player_host` | your PC, in an SDL window |
-| **target** | `sonix_player` | the device |
-
----
-
-## Building for the host
-
-The simulator draws the real interface in an SDL window, using the same source
-as the device. Most work happens here.
-
-### What you need
-
-Compiler, make, git, and four libraries.
-
-**Fedora**
-
-```bash
-sudo dnf install gcc gcc-c++ make git pkgconf-pkg-config \
-                 SDL2-devel freetype-devel opusfile-devel \
-                 wavpack-devel alsa-lib-devel
-```
-
-**Debian / Ubuntu**
-
-```bash
-sudo apt install build-essential git pkg-config \
-                 libsdl2-dev libfreetype-dev libopusfile-dev \
-                 libwavpack-dev libasound2-dev
-```
-
-**Arch**
-
-```bash
-sudo pacman -S base-devel git sdl2 freetype2 opusfile wavpack alsa-lib
-```
-
-`opusfile` pulls in `opus` and `libogg` by itself.
-
-### Build
-
-```bash
-make host -j$(nproc)
-```
-
-### Resources
-
-The player reads its language files, its streaming keys and some of its gui assets
-from a resource tree:
-
-```
-sonix_player_host
-usr/
-└── resource/
-    └── sonix/
-        ├── language/                    the 12 .ini files
-        ├── components/
-        │   ├── streaming-keys.bin       Tidal / Qobuz / Podcast Index / Last.fm keys, sealed - see "Streaming keys" below.
-        │   └── system-info.json         its device-name picks the player the simulator plays
-        ├── fonts/                       the interface faces, and ebook/ with Bookerly for the EPUB reader
-        └── gui/                         some of the .png assets the UI loads at runtime - the rest are inside the binary.
-```
-
-The easiest way to get one is to copy `usr/resource/` out of
-`sonix-packer/assets/R3PII/` or `sonix-packer/assets/R1/` into `usr/resource/`
-next to `sonix_player_host`: the language files, the fonts, the images and the
-`system-info.json` of that player come with it.
-
-Without the language files the interface draws raw tags instead of words, and says so on the first line of the log. Without `streaming-keys.bin` everything works except Tidal, Qobuz, podcasts and Last.fm. The simulator also reads a plain `streaming-keys.ini` in the same folder.
-
-Fonts are looked for in `usr/resource/sonix/fonts` first and fall back to
-`assets/fonts` in the repo, so a tree without a resource folder still has text.
-
-### Run
-
-```bash
-./sonix_player_host
-```
-
-The window is the panel of the player named in `system-info.json`: 480x720 for
-the R3 Pro II, 480x800 for the R1, and 480x720 when the file is missing. The
-mouse is the finger, and dragging scrolls.
-
-`SONIX_PANEL=480x800` opens the window at a given size whatever the file says.
-The rest of the model (buttons, DAC, update file) still follows the file.
-
-The folder that stands in for the memory card is the **documents folder**,
-found from the desktop's own XDG setting. Point it elsewhere with:
-
-```bash
-SONIX_SD_ROOT=/path/to/a/card ./sonix_player_host
-```
-
-Music goes in there, and so does everything the player writes: the index, the
-cover cache, the playlists.
-
-### Keyboard
-
-The device's buttons are on the keyboard:
-
-| key | R3 Pro II | R1 |
-|---|---|---|
-| `p` | power — a tap toggles the screen, held opens the power menu | same |
-| `u` | volume up | same |
-| `i` | volume down | same |
-| `b` | previous track | the skip key: next track |
-| `n` | play / pause | same |
-| `m` | next track | previous track (no such key on the R1) |
-
-
-### Other environment variables
-
-| variable | what it does |
-|---|---|
-| `SONIX_SD_ROOT` | the folder standing in for the card |
-| `SONIX_PANEL` | the window size, e.g. `480x800` |
-| `SONIX_CONFIG` | where the settings file lives |
-| `SONIX_EBOOK_CONFIG` | the ebook reader's own settings file |
-| `SONIX_LANG_DIR` | the language directory, instead of the resource tree |
-| `SONIX_LOG` | write the log to a file |
-| `SONIX_BATTERY_CAPACITY`, `SONIX_BATTERY_STATUS` | two files to fake a battery |
-| `SONIX_NO_MOUNT`, `SONIX_NO_SYSSERVER` | leave the host's own system alone |
-| `SONIX_GBDB_DIR` | where the Game Boy ROM databases are read from |
-| `SONIX_AIRPODS_FAKE` | a pair of AirPods to show without any Bluetooth: model, three battery levels and the noise mode |
-
-
-## Building for the device
-
-### What you need
-
-The host requirements above, plus `wget`, `texinfo`, `bison`, `flex` and about
-2 GB of disk: the first target build compiles a MIPS cross toolchain from
-source.
-
-### Build
-
-```bash
-make target -j$(nproc)
-```
-
-The first run takes a while and does four things by itself:
-
-1. builds the Rockbox MIPS toolchain into `rockbox-toolchain/`
-2. downloads and cross-builds FreeType, static, into `freetype-target/`
-3. downloads and cross-builds libogg, libopus, opusfile and libwavpack, static,
-   into `audio-target/`
-4. compiles and links `sonix_player`, and builds `sonix_launch` (see below)
-
-Steps 1 to 3 happen once. Later builds go straight to step 4.
-
-Everything the device does not already carry is linked statically, so the
-result is one file to copy across with nothing to install beside it. The same
-file goes into both images.
-
-### The ABI check
-
-The link is followed by a `readelf` pass that fails the build if the binary
-asks for a glibc symbol newer than 2.22, the version both players carry.
-
-This is not decoration. A binary that asks for a newer symbol links without a
-word and then refuses to start, and the device reboots as soon as the player
-exits - so the only symptom on the device is a boot loop.
-
-### sonix_launch
-
-A 2 KB static binary with no libc (`launcher/sonix_launch.c`). The launcher
-script execs it, and it runs the player as its child and does `sleep 1; reboot`
-when the player exits - what the rest of the script would do, without a shell
-sitting in memory for the whole session.
-
-
-## Creating the firmware image
-
-The packer looks only next to itself:
-
-```
-sonix-packer/
-├── sonix_firmware_packer.sh
-├── r3proii_original.upt     the stock firmware of the R3 Pro II, from HiBy
-├── r1_original.upt          the stock firmware of the R1, from HiBy
-├── sonix_player             the binary from `make target`
-├── sonix_launch             also from `make target`; optional
-├── kernel/                  xImage-R3PII and xImage-R1; optional
-└── assets/
-    ├── R3PII/               the overlay for the R3 Pro II
-    └── R1/                  the overlay for the R1
-```
-
-It builds one image for each stock firmware it finds. With only one of the two
-`.upt` files next to it, it builds that player's image and says it skipped the
-other.
-
-Each model has a complete overlay of its own and nothing is shared.
-
-An overlay mirrors the rootfs from its root, so a file goes to the path it has
-inside the folder. That is how the resource tree gets installed:
-
-```
-assets/R3PII/                           (and assets/R1/, the same shape)
-├── etc/
-│   ├── boot-logo/                   the default boot logo at the panel's size, one per theme and accent colour
-│   ├── init.d/                      the changed start scripts: boot logo, zram, the user data partition, Wi-Fi, Bluetooth
-│   ├── dbus-1/                      sonix-player.conf, the D-Bus policy that lets the player talk to the Bluetooth stack
-│   └── ssl/                         cert.pem, the certificate list for HTTPS
-├── usr/
-│   ├── bin/                         bluealsa, ntfs-3g, thttpd, wlbt-wifi, the launcher script and the Wi-Fi and AirPlay scripts
-│   ├── lib/                         the bluealsa ALSA plugin, and OpenSSL, libupnp, libsndfile and fdk-aac (see "System libraries" below)
-│   └── resource/
-│       └── sonix/
-│           ├── language/            the 12 .ini files
-│           ├── components/
-│           │   ├── streaming-keys.bin   Tidal / Qobuz / Podcast Index / Last.fm keys, sealed - see "Streaming keys" below.
-│           │   ├── system-info.json     required: names the player, and the packer writes to it
-│           │   └── GB*-Database.dat     the Game Boy ROM databases
-│           ├── fonts/               default.otf, bold.otf, then japanese, korean, thai and arabic .otf, each with a -bold;
-│           │                        ebook/ holds Bookerly for the EPUB reader
-│           └── gui/                 some of the .png assets the UI loads at runtime (Flappy Bird, the remap pictures,
-│                                    the donation QR codes) - the rest are inside the binary.
-└── module_driver/                   the open-source modules and the changed load scripts
-```
-
-`system-info.json` has to be there, and its `device-name` has to be the model
-the folder is for: `HiBy R3 Pro II` in `R3PII/`, `HiBy R1` in `R1/`. The packer
-checks it, writes the build stamp into the `build_version` key, and stops if
-either is wrong. An image carrying the other player's name would offer that
-player's update to a device that cannot survive it.
-
-### Streaming keys
-
-Tidal, Qobuz, Podcast Index and Last.fm need application keys, and they are
-not in this repository: provide your own (for Last.fm, an API account from
-last.fm/api). They go into the image sealed, so that unpacking
-it does not hand them out as a text file.
-
-1. Copy `sonix-player/streaming-keys.ini.example` to
-   `sonix-player/streaming-keys.ini` and fill it in.
-2. Seal it into both assets trees:
-   ```bash
-   cd sonix-player
-   python3 tools/seal_streamkeys.py seal
-   ```
-   The first run creates `streaming-keys.key`, the key that seals them. Keep
-   it: every later `seal` reuses it.
-3. Build the player (`make target`). The Makefile compiles the key into it, so
-   only this build opens the `streaming-keys.bin` sealed with it. A new key
-   means a new build.
-
-`streaming-keys.ini`, `streaming-keys.key` and `streaming-keys.bin` are all
-ignored by git. The packer leaves out a `streaming-keys.ini` found in the
-assets and says so. `python3 tools/seal_streamkeys.py open <file>` prints what
-a `.bin` holds.
-
-This keeps the keys out of plain sight, not out of reach: the key is inside
-`sonix_player`, and whoever takes the binary apart can get them back.
-
-### What it needs installed
-
-```bash
-# Debian / Ubuntu
-sudo apt install p7zip-full squashfs-tools genisoimage
-
-# Fedora
-sudo dnf install p7zip squashfs-tools genisoimage
-```
-
-perl as well, which macOS and most Linux systems already have: it reads the
-stock `sa_sound_hbc3000.ko` (see step 5).
-
-### Build
-
-```bash
-./sonix_firmware_packer.sh
-```
-
-It runs through without asking anything, once for each model:
-
-1. unpacks the `.upt`, joins the rootfs chunks and extracts the squashfs
-2. deletes `usr/bin/hiby_player` and installs `usr/bin/sonix_player`
-3. renames `hiby_player.sh` to `sonix_player.sh` and rewrites the name inside it
-4. points `etc/init.d/S92_03_start_music_player` at the new launcher script
-5. for the R3 Pro II, copies the HBC3000's FPGA configuration out of the stock
-   `sa_sound_hbc3000.ko` into `lib/firmware/hbc3000.fw`, where the open module
-   loads it from (it is HiBy's, so it is not in the assets); then copies
-   `assets/<model>/` over the rootfs and installs
-   `usr/bin/sonix_launch` and has the launcher script exec it (skipped with a warning
-   if it is not there). Before the copy, a library in `assets/<model>/usr/lib`
-   takes the place of the stock one: the stock versioned file it replaces goes
-   (`libupnp.so.6.3.4` for `libupnp.so.6`, and so on), the symlinks to it are
-   pointed at the new file, and the stock `libntfs-3g` goes, which the new
-   `ntfs-3g` has linked in. The stock Wi-Fi driver (`cywdhd`) goes too, once
-   `brcmfmac` and `bcm_wlbt_power` are there to replace it
-6. deletes the stock interface's own resources - `litegui`, `layout`, `str`,
-   `fonts`.
-7. checks the `device-name` in `system-info.json` and writes the build stamp
-   into it
-8. repacks the squashfs, splits it into 512 KB chunks and rebuilds the md5
-   chain the recovery kernel checks
-9. writes `r3proii.upt` or `r1.upt`
-
-With `kernel/xImage-R3PII` or `kernel/xImage-R1` present, that kernel replaces
-the stock one: it may not be bigger than the stock kernel, and its size and md5
-go into `ota_update.in`. Without it the stock kernel is carried across
-untouched, size and md5 copied from the original rather than recomputed. The
-kernels in `kernel/` are built from
-[hiby-custom-kernel](https://github.com/Jepl4r/hiby-custom-kernel), and the
-modules in `assets/<model>/module_driver/` are built against them.
-
-Most of those modules are open-source replacements for HiBy's closed ones,
-from the same kit: same file names and parameters, so the stock `.sh` that
-loads each one stays. A module that is not in `module_driver/` is HiBy's own,
-carried across from the stock firmware.
-
-| | R3 Pro II | R1 |
-|---|---|---|
-| sound card | `x1600_hiby_r3proii_sound_card.ko` | `x1600_hiby_r1_sound_card.ko` |
-| DAC | `codec_cs43198_dual.ko` | `codec_cs43131.ko` |
-| panel, touch | `lcd_st7701_sbtc033001.ko`, `gt9xx_touch.ko` (five fingers) | `lcd_lg35583.ko`, `cst8xx_touch.ko` (two fingers) |
-| keys | `keyboard_adc.ko` | `keyboard_adc_multifunc.ko` |
-| LEDs | `leds_sgm31324_add.ko` | `leds_pwm_add.ko` |
-| Type-C | `fusb302b_add.ko` | `tcs1421_add.ko` |
-| charger | `mp2731.ko`, which also wakes the player from standby when the cable goes in or out, and keeps the charge limit itself | the PMIC, `axp2101.ko`: the player writes the charge limit into it directly |
-| board | `gpio_aw95016_add.ko`, `sau.ko`, `sa_sound_hbc3000.ko` (the HBC3000 FPGA; its configuration comes from the stock firmware, see step 5 above) | |
-| on both | `cw2015.ko` (fuel gauge), `soc_efuse.ko`, `soc_adc.ko`, `rmem_manager.ko`, `i2c_gpio_add.ko` (the DAC's I2C bus), `keyboard_gpio_add.ko` (power and track keys), `sa_sound_switch.ko`, `sa_earpods_adc.ko`, `pwm_backlight.ko`, `soc_utils.ko`, `sa_config_module.ko`, `utils.ko` (the helpers the other modules link against), `soc_gpio.ko` (`/dev/gpio`), `sa_hgl_dma.ko` (`/dev/sa_hgl_dma`), `soc_aic.ko` (the I2S controller), `soc_pwm.ko` (the PWM controller), `soc_i2c.ko` (the I2C controllers), `soc_fb.ko` (the LCD controller, `/dev/fb0`), `soc_msc.ko` (the MMC/SD controllers: the microSD slot and the Wi-Fi chip's SDIO), `axp2101.ko` (the PMIC: regulators and power off) | the same |
-| Wi-Fi | `brcmfmac.ko`, `brcmutil.ko` and `bcm_wlbt_power.ko` in place of `cywdhd.ko` | the same |
-
-### System libraries
-
-`assets/<model>/usr/lib` and `usr/bin` carry newer builds of libraries and
-programs the stock firmware has, the same files in both models:
-
-| | stock | assets |
-|---|---|---|
-| `libssl.so.1.1`, `libcrypto.so.1.1` | OpenSSL 1.1.1f | 1.1.1w |
-| `libupnp.so.6`, `libixml.so.2`, `libthreadutil.so.6` | pupnp 1.6.21 | 1.6.25 |
-| `libsndfile.so.1` | 1.0.28 | 1.2.2 |
-| `libfdk-aac.so.2` | 2.0.1 | 2.0.3 |
-| `ntfs-3g` | 2015.3.14 | 2022.10.3, with libntfs-3g linked in |
-| `thttpd` | 2.27 | 2.29 |
-
-The sonames, paths and build options are the stock ones, so the stock
-programs that use them (`wpa_supplicant`, `ntpd`, `curl`, `adbd`, `dmrd`,
-`shairport`, `bluealsa`) load them unchanged. They are built by
-`tools/system-libs/build.sh` from the upstream sources, against the device's
-own glibc 2.22 taken from a stock rootfs, and checked with
-`tools/system-libs/abicheck.py`:
-
-```bash
-# Ubuntu 24.04, or docker run -it -v "$PWD":/w ubuntu:24.04
-apt install gcc-9-mipsel-linux-gnu binutils-mipsel-linux-gnu libc6-dev-mipsel-cross \
-    autoconf automake libtool pkg-config make git perl python3-pyelftools zlib1g-dev
-tools/system-libs/build.sh <extracted stock rootfs> out
-```
-
-`out/usr/lib` and `out/usr/bin` then go into `assets/R3PII/` and `assets/R1/`.
-
-### Patches
-
-They go in **before** the repack, and the easiest way is through
-the overlay - any other file need to be in the respective folder mirroring the rootfs structure.
-
-### Flashing
-
-1. Copy the image for your player to the **root of the microSD card**:
-   `r3proii.upt` for the R3 Pro II, `r1.upt` for the R1. Never the other one.
-2. Insert the SD card into the player.
-3. Start the update:
-   - **from the stock firmware** - use its firmware update from the microSD
-     card.
-   - **from Sonix Player** - Settings > System > Update firmware > From SD
-     card. *Via internet* downloads the right image from the latest release by
-     itself.
-4. Let it flash - it will say "Upgrading..." then "Succeeded" and reboot by itself.
-
-> It is recommended to **charge above 30%** first. 
-**Recovery from a failed flash:** If something goes wrong, you can always restore by flashing the original stock firmware from HiBy's website using the same procedure.
-
-
-## Generated files
-
-A few files in the tree are produced by a script and committed, so an ordinary
-build needs no Python at all. Re-run the script only when its input changes.
-
-| generated | from | script |
-|---|---|---|
-| `src/gui/shell/icons.c`, `icons.h` | `assets/icons/*.svg`, `*.png` | `tools/svg_to_lvgl.py` |
-| `src/system/net/webpage.h` | `web/index.html`, `web/icons`, `web/img` | `tools/web_to_c.py` |
-| `src/system/device/tzrules.c` | the system's tzdata (`/usr/share/zoneinfo`) | `tools/tz_rules.py` |
-| `ZAP_POINTS` in `src/system/device/chargescreen.c` | `assets/icons/zap-device-off.svg` | `tools/charge_zap.py` prints the table, to paste in |
-
-```bash
-pip install cairosvg pillow
-python3 tools/svg_to_lvgl.py
-
-python3 tools/web_to_c.py
-
-python3 tools/tz_rules.py > src/system/device/tzrules.c
-
-python3 tools/charge_zap.py
-```
-
-
-## Source code tree
-
-```
-sonix-player/
-│
-├── .github/                         the issue forms, and the workflow that checks bug reports for a log
-│
-├── sonix-packer/
-│   ├── assets/
-│   │   ├── R3PII/                   the R3 Pro II overlay
-│   │   │   ├── etc/                 boot logos (480x720), start scripts, D-Bus policy, cert.pem
-│   │   │   ├── module_driver/       the open-source modules, gt9xx_touch.ko among them; gt9xx_touch.sh for five fingers and leds_sgm31324_add.sh with 3 added LED registers
-│   │   │   └── usr/                 bluealsa 4.3.1, resources required by Sonix Player
-│   │   └── R1/                      the R1 overlay
-│   │       ├── etc/                 boot logos (480x800), start scripts, D-Bus policy, cert.pem
-│   │       ├── module_driver/       the open-source modules, cst8xx_touch.ko among them; cst8xx_touch.sh for two fingers
-│   │       └── usr/                 bluealsa 4.3.1, resources required by Sonix Player
-│   │                                
-│   ├── kernel/                      xImage-R3PII and xImage-R1, from hiby-custom-kernel
-│   └── sonix_firmware_packer.sh     
-│
-│
-├── sonix-player/                    
-│   ├── assets/                      
-│   │   ├── gui/                     some of the .png assets the UI loads at runtime - the rest are inside the binary.
-│   │   ├── fonts/                   the faces: default, bold, Japanese, Korean (Hangul from Pretendard, OFL), Thai, Arabic,
-│   │   │                            and mono.ttf, DejaVu Sans Mono (free licence, see mono-license.txt), for the Terminal
-│   │   └── icons/                   245 SVGs and PNGs, baked into src/gui/shell/icons.c
-│   │   
-│   │
-│   ├── launcher/                    sonix_launch.c: runs the player, reboots when it exits
-│   │
-│   ├── rockboxdev/                  builds the MIPS cross toolchain, first `make target` only
-│   │   ├── toolchain-patches/       three patches gcc and binutils needed on a modern host
-│   │   └── rockboxdev.sh
-│   │
-│   ├── src/
-│   │   ├── gb/                      Gearboy, upstream and untouched
-│   │   │   ├── core/                78 files: the emulator itself
-│   │   │   └── miniz/               reads a ROM straight out of a .zip
-│   │   │
-│   │   ├── gui/                     
-│   │   │   ├── apps/                the More, Games and Emulators folders' app tiles, the list of files for an app, starting one
-│   │   │   ├── audio/               EQ, PEQ, AutoEq, MSEB, the DAC page and the metronome
-│   │   │   ├── bluetooth/           pairing, codec, AirPods, receiver mode
-│   │   │   ├── calculator/          the Calculator page in More
-│   │   │   ├── ebook/               EPUB reader: pages, shelf, bar, bookmarks, themes
-│   │   │   ├── flappybird/          the game and its sounds
-│   │   │   ├── games/               Snake, 2048, Breakout, and the pixel canvas they draw into
-│   │   │   ├── fonts/               the lv_font_t objects FreeType fills in at startup
-│   │   │   ├── gearboy/             game list, screen and button pad
-│   │   │   ├── library/             browser, media lists, playlists, search, audiobooks, library scan,
-│   │   │   │                        file manager, picture and text viewer
-│   │   │   ├── nowplaying/          player screen, cover art, cover flow, waveform, queue, chapters,
-│   │   │   │                        lyrics search
-│   │   │   ├── settings/            18 files, one page each
-│   │   │   ├── shell/               28 files: theme, screen switcher, status bar, control centre,
-│   │   │   │                        keyboard, popups, toasts, settings rows, first start, icons.c
-│   │   │   ├── streaming/           Tidal, Qobuz, podcast and radio pages, OPML import
-│   │   │   ├── terminal/            the Terminal page in More
-│   │   │   └── wireless/            Wi-Fi, file transfer, AirPlay, DLNA, SonixLink
-│   │   │
-│   │   ├── system/                  
-│   │   │   ├── audio/               ALSA, volume, filter chain, USB audio, headset
-│   │   │   ├── apps/                reading the Apps folder of the card, and starting an app with the screen, touch and sound
-│   │   │   ├── bluetooth/           the whole stack, run by the player and not by the firmware
-│   │   │   ├── calc/                the Calculator's arithmetic: the expression evaluator, functions, number formatting
-│   │   │   ├── core/                config, language, logging, paths, utils
-│   │   │   ├── db/                  SQLite
-│   │   │   ├── decode/              one file per format, plus the dispatcher and CUE handling
-│   │   │   ├── device/              power, screen, buttons, USB, storage, ADB, firmware and online
-│   │   │   │                        updates, LED, clock and time zones, boot logo, charging screen
-│   │   │   ├── ebook/               EPUB parsing: zip, XML, XHTML, CSS, OPF, arenas
-│   │   │   ├── gearboy/             the emulator's glue: input, ROM database, save states
-│   │   │   ├── image/               JPEG and PNG decoder
-│   │   │   ├── input/               key mapping, keyboard layouts
-│   │   │   ├── lastfm/              scrobbling
-│   │   │   ├── library/             index, tag reading, cover art, playlists, audiobooks, lyrics and
-│   │   │   │                        LRCLIB, play counts
-│   │   │   ├── net/                 HTTP, TLS, HLS, mDNS, transfer page
-│   │   │   ├── playback/            queue, play history, device state, audiobooks, sleep timers
-│   │   │   ├── remote/              AirPlay, DLNA, SonixLink
-│   │   │   ├── streaming/           Tidal, Qobuz, radio and podcast clients, downloads, OPML, caches
-│   │   │   └── terminal/            the shell behind the Terminal page, and the Terminal folder on the card
-│   │   │
-│   │   └── main.c                   entry point: display, input, and the startup order
-│   │
-│   ├── tools/                       generators, seal_streamkeys.py, the multitouch patches for the stock
-│   │                                touch drivers, and system-libs/, the build of the system libraries
-│   │                                in the assets
-│   │
-│   ├── web/                         Wi-Fi transfer page, source of src/system/net/webpage.h
-│   │   ├── icons/                   26 Lucide glyphs, inlined as <symbol>
-│   │   ├── img/                     favicon-web.png, logo-web.png
-│   │   └── index.html               the template
-│   │
-│   ├── generate_compile_commands.py 
-│   ├── lv_conf.h                    
-│   └── Makefile                     
-│
-├── FEATURES.md                      
-├── LICENSE                          
-├── PATCHES.md                       
-└── README.md
-```
-
-
+## Building
+
+`make host` builds a simulator that draws the real interface in an SDL window; `make target` builds the
+player for the device; `sonix-packer/sonix_firmware_packer.sh` turns a stock HiBy firmware and that binary into
+an image. [BUILDING.md](BUILDING.md) has the details: dependencies, the resource tree, the packer, streaming
+keys, system libraries, generated files and the source tree.
 
 ## Special thanks to:
 [@Tartarus6](https://github.com/Tartarus6)
