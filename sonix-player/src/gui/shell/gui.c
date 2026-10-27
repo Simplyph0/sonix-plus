@@ -64,6 +64,11 @@
 #include "src/gui/audio/dacpage.h"
 #include "src/gui/audio/metronomepage.h"
 #include "src/gui/calculator/calculatorpage.h"
+#include "src/gui/apps/applauncherui.h"
+#include "src/gui/games/breakout.h"
+#include "src/gui/games/game2048.h"
+#include "src/gui/games/snake.h"
+#include "src/gui/apps/rompage.h"
 #include "src/gui/terminal/terminalpage.h"
 #include "src/system/bluetooth/btreceiver.h"
 #include "src/system/audio/usbdac.h"
@@ -631,6 +636,12 @@ void gui_init(gui_config_t *cfg) {
 	dlna_screen = lv_obj_create(NULL);
 	sonixlink_screen = lv_obj_create(NULL);
 	morepage_screen = lv_obj_create(NULL);
+	gamespage_screen = lv_obj_create(NULL);
+	emulatorspage_screen = lv_obj_create(NULL);
+	rompage_screen = lv_obj_create(NULL);
+	snake_screen = lv_obj_create(NULL);
+	game2048_screen = lv_obj_create(NULL);
+	breakout_screen = lv_obj_create(NULL);
 	filespage_screen = lv_obj_create(NULL);
 	textview_screen = lv_obj_create(NULL);
 	imageview_screen = lv_obj_create(NULL);
@@ -696,6 +707,11 @@ void gui_init(gui_config_t *cfg) {
 	ebookmarkspage_init(cfg);
 	ebooksettings_init(cfg); // likewise: the other corner button opens this
 	ebookpage_init(cfg);
+	snake_init(cfg);
+	game2048_init(cfg);
+	breakout_init(cfg);
+	applauncherui_init(cfg);
+	rompage_init(cfg);
 	morepage_init(cfg);
 	textview_init(cfg);	 // before filespage: a text file tapped there opens here
 	imageview_init(cfg); // likewise, for a picture
@@ -769,6 +785,7 @@ void gui_init(gui_config_t *cfg) {
 		btsettings_screen, btaudio_screen,	 airpodspage_screen, airplay_screen,   streaming_screen,
 		radiopage_screen,  radiolist_screen, radiosearch_screen,
 		dlna_screen,	   sonixlink_screen,	 morepage_screen,	  gearboypage_screen, metronomepage_screen,
+		gamespage_screen, emulatorspage_screen, rompage_screen,
 	};
 	for (size_t i = 0; i < sizeof(back_swipe_screens) / sizeof(back_swipe_screens[0]); i++) {
 		switcher_attach_back_gesture(back_swipe_screens[i]);

@@ -35,6 +35,12 @@ each release says what changed in it in [CHANGELOG.md](CHANGELOG.md)):
   all the songs kept on the card, so All tracks, Artists, Albums, Genres, Starred
   and search open at once, with server stars and play reporting.
 - **Lyrics on streamed tracks**, from the lyrics in the file.
+- **Games** in More: Flappy Bird, Snake, 2048 and Breakout.
+- **Emulators** in More: the Game Boy built in, and NES, GBA and SNES as apps from the card.
+- **Apps from the card**: a program in `Apps/<name>/` with a small `manifest.ini` shows up
+  as a tile in More, Games or Emulators, and gets the screen, the touch panel and the sound
+  while it runs. Nothing is linked into the player, so an app can have any licence
+  ([APPS.md](APPS.md); the SDK is [sonix-app-sdk](https://github.com/Simplyph0/sonix-app-sdk)).
 - **Firmware builds on GitHub**: a workflow that builds both images and publishes
   them as a release.
 
@@ -70,6 +76,50 @@ sonix-player/rockbox-toolchain/bin/mipsel-rockbox-linux-gnu-gcc -O2 -march=mips3
 The card is FAT, but it is mounted with the execute bits on, so a copied program
 runs as it is. Programs that draw the whole screen and read single keys (vi, top)
 do not work yet: the Terminal sends a line at a time.
+
+## Games, emulators and apps
+
+**More** holds two folders: **Games** and **Emulators**. Both also list apps from the card.
+
+**Games** (built in): Flappy Bird, Snake (swipe to steer), 2048 (swipe to slide) and Breakout
+(slide a finger to move the paddle, tap to serve). Each keeps its best score.
+
+**Emulators**: the Game Boy is built in (ROMs in `Games/GB` and `Games/GBC`). NES, GBA and SNES
+are apps you copy to the card:
+
+| App | Games go in | Get it |
+| --- | --- | --- |
+| [NES](https://github.com/Simplyph0/sonix-app-nes) | `Games/NES` | build it (below) |
+| [GBA](https://github.com/Simplyph0/sonix-app-gba) | `Games/GBA` | build it (below) |
+| [SNES](https://github.com/Simplyph0/sonix-app-snes) | `Games/SNES` | build it yourself: Snes9x is non-commercial, so no program is offered |
+
+1. Open **More > Games** or **More > Emulators** once with a card in. The player makes
+   `Apps/` on the card.
+2. Copy an app's folder (for example `NES`) into `Apps/`. Delete the folder to remove it.
+3. Copy your games into the folder named above. The player makes the folder when you
+   first open the app, so you can see where to put them.
+4. Open the app and tap a game. The emulator shows the game on top and a pad below it.
+   **SAVE** and **LOAD** keep one save state per game, and **EXIT** (hold it for a moment)
+   leaves. Battery saves go to `Saves/<system>/` on the card.
+
+Apps run as root, so install only ones you trust. If one hangs, the power menu should still restart
+the player, though I have not tried that with a hung app.
+
+**Writing an app**: an app is a folder with a `manifest.ini`, an icon and a MIPS program.
+[APPS.md](APPS.md) has the format and everything the player gives an app, and
+[sonix-app-sdk](https://github.com/Simplyph0/sonix-app-sdk) has the header for screen, touch and
+sound, a libretro frontend, and examples.
+
+**Building apps from source**: each app repo has a Makefile. With the MIPS toolchain that
+`make target` builds (see [Building for the device](#building-for-the-device)):
+
+```bash
+make fetch
+make package CROSS=/path/to/sonix-player/rockbox-toolchain/bin/mipsel-rockbox-linux-gnu-
+```
+
+That makes `dist/<Name>/`, ready to copy to `Apps/`. `make host` builds one for your computer, and
+`python3 tools/mkrom.py` in each emulator repo writes a small test ROM.
 
 ## Install
 
@@ -550,7 +600,7 @@ sonix-player/
 │   │   ├── gui/                     some of the .png assets the UI loads at runtime - the rest are inside the binary.
 │   │   ├── fonts/                   the faces: default, bold, Japanese, Korean (Hangul from Pretendard, OFL), Thai, Arabic,
 │   │   │                            and mono.ttf, DejaVu Sans Mono (free licence, see mono-license.txt), for the Terminal
-│   │   └── icons/                   238 SVGs and PNGs, baked into src/gui/shell/icons.c
+│   │   └── icons/                   245 SVGs and PNGs, baked into src/gui/shell/icons.c
 │   │   
 │   │
 │   ├── launcher/                    sonix_launch.c: runs the player, reboots when it exits
@@ -565,11 +615,13 @@ sonix-player/
 │   │   │   └── miniz/               reads a ROM straight out of a .zip
 │   │   │
 │   │   ├── gui/                     
+│   │   │   ├── apps/                the More, Games and Emulators folders' app tiles, the list of files for an app, starting one
 │   │   │   ├── audio/               EQ, PEQ, AutoEq, MSEB, the DAC page and the metronome
 │   │   │   ├── bluetooth/           pairing, codec, AirPods, receiver mode
 │   │   │   ├── calculator/          the Calculator page in More
 │   │   │   ├── ebook/               EPUB reader: pages, shelf, bar, bookmarks, themes
 │   │   │   ├── flappybird/          the game and its sounds
+│   │   │   ├── games/               Snake, 2048, Breakout, and the pixel canvas they draw into
 │   │   │   ├── fonts/               the lv_font_t objects FreeType fills in at startup
 │   │   │   ├── gearboy/             game list, screen and button pad
 │   │   │   ├── library/             browser, media lists, playlists, search, audiobooks, library scan,
@@ -585,6 +637,7 @@ sonix-player/
 │   │   │
 │   │   ├── system/                  
 │   │   │   ├── audio/               ALSA, volume, filter chain, USB audio, headset
+│   │   │   ├── apps/                reading the Apps folder of the card, and starting an app with the screen, touch and sound
 │   │   │   ├── bluetooth/           the whole stack, run by the player and not by the firmware
 │   │   │   ├── calc/                the Calculator's arithmetic: the expression evaluator, functions, number formatting
 │   │   │   ├── core/                config, language, logging, paths, utils

@@ -447,6 +447,12 @@ COLOR_ICONS = [
     ("file-explorer.png", "menu_file_explorer", SECTION_ICON_SIZE),
     ("metronome.png", "menu_metronome", SECTION_ICON_SIZE),
     ("calculator.png", "menu_calculator", SECTION_ICON_SIZE),
+    ("folder-games.png", "menu_games", SECTION_ICON_SIZE),
+    ("folder-emulators.png", "menu_emulators", SECTION_ICON_SIZE),
+    ("snake.png", "menu_snake", SECTION_ICON_SIZE),
+    ("game2048.png", "menu_game2048", SECTION_ICON_SIZE),
+    ("breakout.png", "menu_breakout", SECTION_ICON_SIZE),
+    ("app.png", "menu_app", SECTION_ICON_SIZE),
     ("terminal.png", "menu_terminal", SECTION_ICON_SIZE),
 
     # The service badges in the player's top right corner, where the radio puts

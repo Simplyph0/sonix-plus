@@ -1249,6 +1249,14 @@ void display_set_rotated(bool rotated) { host_rotated = rotated; }
 // is no evdev node to hand over, and nothing to switch off.
 void panel_touch_enable(bool enabled) { (void)enabled; }
 const char *panel_touch_device(void) { return NULL; }
+void panel_app_begin(void) {}
+void panel_app_end(void) {}
+bool panel_app_geometry(int *width, int *height, bool *rotated) {
+	(void)width;
+	(void)height;
+	(void)rotated;
+	return false;
+}
 
 // There is no framebuffer to read on the simulator, but the SDL renderer can
 // be read back. The rest of the path is identical (same copy, same flash, same
@@ -1628,6 +1636,47 @@ void panel_touch_enable(bool enabled) {
 }
 
 bool display_get_rotated(void) { return fb_rotated; }
+
+// An app from the card takes the panel. LVGL stops painting -- a timer that
+// invalidates something (the clock) would otherwise draw over the app -- and
+// stops reading the touch node, which the app opens for itself.
+void panel_app_begin(void) {
+	lv_display_t *disp = lv_display_get_default();
+	if (disp) {
+		lv_display_enable_invalidation(disp, false);
+	}
+	panel_touch_enable(false);
+}
+
+// ...and gives it back. The app has done as it liked with the framebuffer: its
+// mode, which page is shown, what is on both pages. The wake path already knows
+// how to put all of that back -- the video mode is set again, with the
+// double-height virtual resolution the page flipping needs, and the current page
+// is shown -- and one invalidation of everything makes the next flushes repaint
+// both pages from the interface.
+void panel_app_end(void) {
+	lv_display_t *disp = lv_display_get_default();
+	if (!disp) {
+		return;
+	}
+	display_wake_begin(disp);
+	lv_display_enable_invalidation(disp, true);
+	lv_obj_invalidate(lv_screen_active());
+	lv_obj_invalidate(lv_layer_top());
+	lv_obj_invalidate(lv_layer_sys());
+	display_wake_end(disp);
+	panel_touch_enable(true);
+}
+
+bool panel_app_geometry(int *width, int *height, bool *rotated) {
+	if (fb_fd < 0) {
+		return false;
+	}
+	*width = (int)fb_var.xres;
+	*height = (int)fb_var.yres;
+	*rotated = fb_rotated;
+	return true;
+}
 
 void display_set_rotated(bool rotated) {
 	if (!fb_display || rotated == fb_rotated) {

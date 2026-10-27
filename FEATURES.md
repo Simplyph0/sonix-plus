@@ -152,11 +152,16 @@ This is everything Sonix Player can do today, on both the **R1** and the **R3 Pr
 
 ## More
 
+More holds two folders, **Games** and **Emulators**, with the rest of its tiles beside them.
+
+- **Games** (More > Games) - **Flappy Bird**, with sounds; **Snake**, swipe to steer, faster with every apple; **2048**, swipe to slide the tiles and keep going past 2048; and **Breakout**, slide a finger to move the paddle, three lives. Each remembers its best score.
+- **Emulators** (More > Emulators) - **Game Boy**, below. More can be added: see Apps.
+- **Apps** - a program on the card, in `Apps/<name>/` with a small `manifest.ini`, shows up as a tile in More, Games or Emulators and gets the screen, the touch panel and the sound while it runs. An app can open files from a folder of the card (an emulator's games, say) and the player lists them. Install one by copying its folder; remove it by deleting the folder. See [APPS.md](APPS.md).
+
 - **File manager** - browse the card, create folders, rename, move, copy and delete. Pictures and text files open right there.
 - **Metronome** - 30 to 250 BPM, up to 7 beats per bar, and tap tempo.
-- **Game Boy** (Gearboy) - plays Game Boy and Game Boy Color games, with their real names, save states, five palettes, shaders and color correction.
+- **Game Boy** (Gearboy), in Emulators - plays Game Boy and Game Boy Color games, with their real names, save states, five palettes, shaders and color correction.
   > ROMs go in `Games/GB` and `Games/GBC`. The boot ROMs (optional) go in `Games/Bios`: `dmg_boot.bin` and `cgb_boot.bin`.
-- **Flappy Bird**, with sounds.
 - **Calculator** - the four operations, percent and sign, with the usual order of operations and the sum shown above the answer. The pill in the corner switches on the scientific keys: brackets, memory, powers and roots, logarithms, trigonometry in degrees or radians (with a 2nd key for the inverses), factorial, pi, e, EE and a random number.
 - **Terminal** - a shell on the player, typed into with the keyboard chosen in Settings, in the monospaced DejaVu Sans Mono (a `Terminal/font.ttf` on the card replaces it). Output is in colour and follows cursor movement, so fastfetch lays out like it does on a computer. `A-` and `A+` in the corner change the text size (down to 8 px), the button beside them sets how many columns wide the screen is (Fit, or 80 to 200, scrolling sideways), and `^C` interrupts (twice ends the shell). A row of keys above the keyboard adds `Tab` (completes a program name or a path from where the shell is), the up and down arrows (the lines you ran before), the left and right arrows (move within the line) and `|`, `/`, `~` and `-`.
   > Programs for it go in `Terminal/bin` on the card, made by Developer options > Terminal binaries. They have to be built for 32-bit MIPS, static or against glibc 2.22.

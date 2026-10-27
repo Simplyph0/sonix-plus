@@ -40,6 +40,23 @@ static void action_cb(lv_event_t *e) {
 	action();
 }
 
+// A tile that calls something with an argument keeps both in one small block,
+// which goes when the tile does.
+typedef struct {
+	void (*fn)(void *);
+	void *arg;
+} action_arg_t;
+
+static void action_arg_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active() || coverflow_drag_active()) {
+		return; // a swipe, not a tap
+	}
+	const action_arg_t *a = lv_event_get_user_data(e);
+	a->fn(a->arg);
+}
+
+static void action_arg_free_cb(lv_event_t *e) { free(lv_event_get_user_data(e)); }
+
 // The two children add_tile() puts on every tile, in the order it makes them.
 #define TILE_ICON_CHILD 0
 #define TILE_LABEL_CHILD 1
@@ -97,6 +114,14 @@ static void add_tile(lv_obj_t *grid, const grid_entry_t *entry, int width, int h
 		lv_obj_add_event_cb(tile, switch_screen_cb, LV_EVENT_CLICKED, *entry->target);
 	} else if (entry->action) {
 		lv_obj_add_event_cb(tile, action_cb, LV_EVENT_CLICKED, (void *)entry->action);
+	} else if (entry->action_arg) {
+		action_arg_t *a = malloc(sizeof(*a));
+		if (a) {
+			a->fn = entry->action_arg;
+			a->arg = entry->arg;
+			lv_obj_add_event_cb(tile, action_arg_cb, LV_EVENT_CLICKED, a);
+			lv_obj_add_event_cb(tile, action_arg_free_cb, LV_EVENT_DELETE, a);
+		}
 	} else {
 		lv_obj_add_event_cb(tile, unavailable_cb, LV_EVENT_CLICKED, (void *)entry->label);
 		lv_obj_set_style_opa(icon, LV_OPA_40, 0);

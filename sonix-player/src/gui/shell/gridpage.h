@@ -24,6 +24,12 @@ typedef struct {
 	// Checked only when `target` is NULL; entries that set neither are the
 	// dimmed not-yet-available tiles.
 	void (*action)(void);
+
+	// The same, for a tile that stands for one of a set made at run time (an app
+	// on the card): `action_arg` is called with `arg`. Checked after `target` and
+	// `action`. Entries written without these fields leave them empty.
+	void (*action_arg)(void *arg);
+	void *arg;
 } grid_entry_t;
 
 // Fills `screen` with a `columns` x `rows` grid of tiles sized from the config.
