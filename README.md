@@ -36,7 +36,7 @@ each release says what changed in it in [CHANGELOG.md](CHANGELOG.md)):
   and search open at once, with server stars and play reporting.
 - **Lyrics on streamed tracks**, from the lyrics in the file.
 - **Games** in More: Flappy Bird, Snake, 2048 and Breakout.
-- **Emulators** in More: the Game Boy, and room for more.
+- **Emulators** in More: the Game Boy built in, and NES, GBA and SNES as apps from the card.
 - **Apps from the card**: a program in `Apps/<name>/` with a small `manifest.ini` shows up
   as a tile in More, Games or Emulators, and gets the screen, the touch panel and the sound
   while it runs. Nothing is linked into the player, so an app can have any licence

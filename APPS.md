@@ -123,9 +123,14 @@ The MIPS toolchain that `make target` builds makes them.
 | --- | --- | --- | --- |
 | Hello | The smallest app: colour bars, a circle under every finger, a tone while you touch | [sonix-app-sdk](https://github.com/Simplyph0/sonix-app-sdk) (`examples/hello`) | MIT |
 | Frontend test | The emulator frontend with a test core: the pad, a tone, a save counter | [sonix-app-sdk](https://github.com/Simplyph0/sonix-app-sdk) (`examples/frontend-test`) | MIT |
+| NES | Nintendo Entertainment System, with FCEUmm | [sonix-app-nes](https://github.com/Simplyph0/sonix-app-nes) | MIT (the app), GPLv2 (FCEUmm) |
+| GBA | Game Boy Advance, with gpSP and its MIPS recompiler | [sonix-app-gba](https://github.com/Simplyph0/sonix-app-gba) | MIT (the app), GPLv2 (gpSP) |
+| SNES | Super Nintendo, with Snes9x 2005. A recipe only: Snes9x is non-commercial, so there is no program to download, and you build it yourself | [sonix-app-snes](https://github.com/Simplyph0/sonix-app-snes) | MIT (the recipe), Snes9x licence |
 
-Emulators built on the SDK's frontend are planned, each in a repository of its own. They will be
-listed here when they exist.
+The three emulators are the SDK's libretro frontend with a core linked in. They put the game on the
+top of the screen and a pad below it, keep battery saves in `Saves/<system>/` and one save state per
+game, and list the files of `Games/NES`, `Games/GBA` or `Games/SNES`. The GBA and SNES apps have
+been run with test ROMs on a computer, not on a player yet.
 
 ## Built in
 
