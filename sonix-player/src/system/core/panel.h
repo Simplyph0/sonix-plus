@@ -26,4 +26,22 @@ void panel_touch_enable(bool enabled);
 // device.
 const char *panel_touch_device(void);
 
+// ---------------------------------------------------------------------------
+// Handing the whole panel to a program of its own
+// ---------------------------------------------------------------------------
+//
+// An app from the card (system/apps) draws on the framebuffer itself and reads
+// the touch panel itself. While one runs the player must neither draw nor read:
+// panel_app_begin() stops LVGL painting and parks its touch indev, and
+// panel_app_end() puts the panel back the way the player had it and repaints
+// every page of the interface. On the host build they do nothing.
+void panel_app_begin(void);
+void panel_app_end(void);
+
+// What an app needs to know to draw: the panel's size and whether the picture
+// is turned 180 degrees (Settings > Display), which the app has to do for
+// itself on the framebuffer and on the touch coordinates. False without a
+// framebuffer (the host build).
+bool panel_app_geometry(int *width, int *height, bool *rotated);
+
 #endif /* PANEL_H */

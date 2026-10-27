@@ -35,6 +35,12 @@ each release says what changed in it in [CHANGELOG.md](CHANGELOG.md)):
   all the songs kept on the card, so All tracks, Artists, Albums, Genres, Starred
   and search open at once, with server stars and play reporting.
 - **Lyrics on streamed tracks**, from the lyrics in the file.
+- **Games** in More: Flappy Bird, Snake, 2048 and Breakout.
+- **Emulators** in More: the Game Boy, and room for more.
+- **Apps from the card**: a program in `Apps/<name>/` with a small `manifest.ini` shows up
+  as a tile in More, Games or Emulators, and gets the screen, the touch panel and the sound
+  while it runs. Nothing is linked into the player, so an app can have any licence
+  ([APPS.md](APPS.md); the SDK is [sonix-app-sdk](https://github.com/Simplyph0/sonix-app-sdk)).
 - **Firmware builds on GitHub**: a workflow that builds both images and publishes
   them as a release.
 
@@ -550,7 +556,7 @@ sonix-player/
 │   │   ├── gui/                     some of the .png assets the UI loads at runtime - the rest are inside the binary.
 │   │   ├── fonts/                   the faces: default, bold, Japanese, Korean (Hangul from Pretendard, OFL), Thai, Arabic,
 │   │   │                            and mono.ttf, DejaVu Sans Mono (free licence, see mono-license.txt), for the Terminal
-│   │   └── icons/                   238 SVGs and PNGs, baked into src/gui/shell/icons.c
+│   │   └── icons/                   245 SVGs and PNGs, baked into src/gui/shell/icons.c
 │   │   
 │   │
 │   ├── launcher/                    sonix_launch.c: runs the player, reboots when it exits
@@ -565,11 +571,13 @@ sonix-player/
 │   │   │   └── miniz/               reads a ROM straight out of a .zip
 │   │   │
 │   │   ├── gui/                     
+│   │   │   ├── apps/                the More, Games and Emulators folders' app tiles, the list of files for an app, starting one
 │   │   │   ├── audio/               EQ, PEQ, AutoEq, MSEB, the DAC page and the metronome
 │   │   │   ├── bluetooth/           pairing, codec, AirPods, receiver mode
 │   │   │   ├── calculator/          the Calculator page in More
 │   │   │   ├── ebook/               EPUB reader: pages, shelf, bar, bookmarks, themes
 │   │   │   ├── flappybird/          the game and its sounds
+│   │   │   ├── games/               Snake, 2048, Breakout, and the pixel canvas they draw into
 │   │   │   ├── fonts/               the lv_font_t objects FreeType fills in at startup
 │   │   │   ├── gearboy/             game list, screen and button pad
 │   │   │   ├── library/             browser, media lists, playlists, search, audiobooks, library scan,
@@ -585,6 +593,7 @@ sonix-player/
 │   │   │
 │   │   ├── system/                  
 │   │   │   ├── audio/               ALSA, volume, filter chain, USB audio, headset
+│   │   │   ├── apps/                reading the Apps folder of the card, and starting an app with the screen, touch and sound
 │   │   │   ├── bluetooth/           the whole stack, run by the player and not by the firmware
 │   │   │   ├── calc/                the Calculator's arithmetic: the expression evaluator, functions, number formatting
 │   │   │   ├── core/                config, language, logging, paths, utils
