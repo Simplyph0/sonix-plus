@@ -39,7 +39,9 @@ Everything the player can do is in **[FEATURES.md](FEATURES.md)**, what changed 
 **Going back to HiBy's firmware:** flash the original from HiBy's website the same way.
 
 > *Via internet* on Sonix Player's update page looks at the releases of the repository named in
-> `system-info.json` (`ota-repo`), which is still Jepl4r/sonix-player.
+> `system-info.json` (`ota-repo`): `Simplyph0/sonix-plus` in images built from this repository. It offers a
+> release whose tag is newer than the installed `OS_version`, which is still 1.3.0, so a release has to be
+> tagged above that to be offered.
 
 ## Games, emulators and apps
 

@@ -20,7 +20,7 @@
 //         "dac-info": "Dual Cirrus Logic CS43198",
 //         "OS_version": "1.0",
 //         "Build_version": "182",
-//         "ota-repo": "Jepl4r/sonix-player"
+//         "ota-repo": "Simplyph0/sonix-plus"
 //     }
 //
 // This way updating the build number does not mean rebuilding, and whoever
