@@ -232,6 +232,11 @@ jobs:
       - name: Pack the firmware images
         if: ${{ !inputs.build_only }}
         working-directory: sonix-packer
+        env:
+          # The tag, which the packer writes into the images as OS_version: the player offers a
+          # release whose tag is newer than the version it carries. Empty for a run with no tag,
+          # and then the images keep the version of the files in the repository.
+          OS_VERSION: ${{ steps.tag.outputs.tag }}
         run: |
           cp ../sonix-player/sonix_player ../sonix-player/sonix_launch .
           bash ./sonix_firmware_packer.sh

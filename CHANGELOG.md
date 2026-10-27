@@ -12,6 +12,8 @@ the section for its own tag, so write the section here before pushing the tag
   tiles in More, Games or Emulators and are given the screen, the touch panel and the
   sound while they run ([APPS.md](APPS.md)). Apps that open files get a list of the
   files in the folder they name.
+- **Updates from this repository**: the player's "Via internet" update now reads `Simplyph0/sonix-plus`, and
+  the release workflow writes the tag into the images as `OS_version`.
 - **NES, GBA and SNES** as apps from the card, each in a repository of its own, on a
   shared libretro frontend ([sonix-app-sdk](https://github.com/Simplyph0/sonix-app-sdk)).
 

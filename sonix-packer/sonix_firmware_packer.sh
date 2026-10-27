@@ -635,6 +635,25 @@ build_one() {
 
 	grep -q "\"$BUILD_STAMP\"" "$JSON" || die "$KEY was not rewritten."
 	say "    $KEY = $BUILD_STAMP"
+
+	# The version the player compares releases with. "Update firmware > Via internet"
+	# offers a release whose tag is newer than "OS_version", so an image has to say
+	# which release it is or it will be offered the same release again after it has
+	# installed it. The release workflow passes the tag; without OS_VERSION the file
+	# is left as it is, which is right for a build that is not a release.
+	if [ -n "${OS_VERSION:-}" ]; then
+		VERSION_VALUE="${OS_VERSION#v}"
+		VERSION_VALUE="${VERSION_VALUE#V}"
+		case "$VERSION_VALUE" in
+			[0-9]*) ;;
+			*) die "OS_VERSION \"$OS_VERSION\" does not start with a number (a leading v is fine)." ;;
+		esac
+		VERSION_KEY="$(grep -oE '"[Oo][Ss]_[Vv][Ee][Rr][Ss][Ii][Oo][Nn]"' "$JSON" | head -1 || true)"
+		[ -n "$VERSION_KEY" ] || die "$SYSTEM_INFO has no OS_version key, in any case."
+		sed_file "s/($VERSION_KEY[[:space:]]*:[[:space:]]*\")[^\"]*(\")/\\1$VERSION_VALUE\\2/" "$JSON"
+		grep -q "$VERSION_KEY[[:space:]]*:[[:space:]]*\"$VERSION_VALUE\"" "$JSON" || die "$VERSION_KEY was not rewritten."
+		say "    $VERSION_KEY = $VERSION_VALUE"
+	fi
 	say ""
 
 	# ==========================================================================

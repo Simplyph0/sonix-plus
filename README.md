@@ -40,8 +40,9 @@ Everything the player can do is in **[FEATURES.md](FEATURES.md)**, what changed 
 
 > *Via internet* on Sonix Player's update page looks at the releases of the repository named in
 > `system-info.json` (`ota-repo`): `Simplyph0/sonix-plus` in images built from this repository. It offers a
-> release whose tag is newer than the installed `OS_version`, which is still 1.3.0, so a release has to be
-> tagged above that to be offered.
+> release whose tag is newer than the installed `OS_version`. The release workflow writes the tag into the
+> images as `OS_version`, so an installed release is not offered again. The images already out say 1.3.0, so
+> the first release for this to find has to be tagged above that (for example `v1.4.0`).
 
 ## Games, emulators and apps
 
