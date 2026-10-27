@@ -77,7 +77,8 @@ The environment says what it needs:
 The framebuffer is 16 bits per pixel (RGB565) and the player leaves it two screens tall (the second
 screen is for flipping). An app draws on the screen that is not showing and pans to it, as the
 player does. If `SONIX_ROTATED` is set the app has to turn its own picture, and its touch
-coordinates, by 180 degrees.
+coordinates, by 180 degrees. Writing the framebuffer is slow, so an app that changes only part of the
+screen each frame should write only that part (the SDK's `sonix_video_present_dirty` does).
 
 ### Touch
 

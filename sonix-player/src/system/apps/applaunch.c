@@ -18,6 +18,7 @@
 
 #include "src/gui/shell/gui.h"
 #include "src/system/audio/audio.h"
+#include "src/system/core/utils.h"
 #include "src/system/core/panel.h"
 #include "src/system/device/power.h"
 #include "src/system/device/system.h"
@@ -25,20 +26,20 @@
 extern char **environ;
 
 #define AUDIO_FD 3
-// A pipe this small holds about 23 ms of 44.1 kHz stereo: the app cannot run
+// A pipe this small holds about 46 ms of 44.1 kHz stereo: the app cannot run
 // far ahead of the sound card, which is what paces it and keeps the sound in
-// step with what it draws.
-#define AUDIO_PIPE_BYTES 4096
+// step with what it draws, and it can be a frame or two late without a gap.
+#define AUDIO_PIPE_BYTES 8192
 // The output's own buffer: deep enough not to underrun, shallow enough that a
 // game's button press is heard now.
-#define AUDIO_BUFFER_MS 46
+#define AUDIO_BUFFER_MS 60
 
 typedef struct {
 	pid_t pid;
 	int audio_read;
 	void (*on_exit)(void *);
 	void *user;
-	bool killed;
+	bool failed; // it ended by a signal or with a status other than 0
 } run_t;
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -80,6 +81,22 @@ static bool read_full(int fd, void *buf, size_t n) {
 	return true;
 }
 
+// Reads and throws away what the app writes until it closes the pipe. An app that is
+// not heard must still not be stopped by a pipe nobody reads: its writes would block
+// as soon as the pipe is full, and the app would hang there.
+static void drain_audio(int fd) {
+	uint8_t scrap[AUDIO_PIPE_BYTES];
+	for (;;) {
+		ssize_t r = read(fd, scrap, sizeof(scrap));
+		if (r < 0 && errno == EINTR) {
+			continue;
+		}
+		if (r <= 0) {
+			return;
+		}
+	}
+}
+
 // The sound the app writes, played through the player's own output until the app
 // closes the pipe -- which it does by exiting, or never having written.
 static void play_audio(int fd) {
@@ -90,10 +107,12 @@ static void play_audio(int fd) {
 	if (header.rate < 8000 || header.rate > 192000 || header.channels < 1 || header.channels > 2) {
 		fprintf(stderr, "apps: the app's sound header says %u Hz, %u channels; no sound\n", header.rate,
 				header.channels);
+		drain_audio(fd);
 		return;
 	}
 	if (!audio_external_begin_latency((int)header.rate, (int)header.channels, 16, AUDIO_BUFFER_MS)) {
-		fprintf(stderr, "apps: no sound output for the app\n");
+		fprintf(stderr, "apps: no sound output for the app at %u Hz\n", header.rate);
+		drain_audio(fd);
 		return;
 	}
 	const size_t frame = header.channels * sizeof(int16_t);
@@ -130,6 +149,9 @@ static void finish_cb(void *arg) {
 	pthread_mutex_unlock(&lock);
 
 	printf("apps: the app has ended\n");
+	if (run->failed) {
+		gui_notify_popup("apps_stopped");
+	}
 	if (run->on_exit) {
 		run->on_exit(run->user);
 	}
@@ -138,6 +160,9 @@ static void finish_cb(void *arg) {
 
 static void *worker_main(void *arg) {
 	run_t *run = arg;
+	// The sound is this thread's whole job, and a late wake-up is a gap in it: it runs ahead of
+	// the player's ordinary threads, as the Game Boy's and the metronome's do.
+	thread_be_realtime("app-audio", 10);
 	play_audio(run->audio_read);
 	close(run->audio_read);
 
@@ -145,8 +170,10 @@ static void *worker_main(void *arg) {
 	waitpid(run->pid, &status, 0);
 	if (WIFEXITED(status)) {
 		printf("apps: exit status %d\n", WEXITSTATUS(status));
+		run->failed = WEXITSTATUS(status) != 0;
 	} else if (WIFSIGNALED(status)) {
 		printf("apps: ended by signal %d\n", WTERMSIG(status));
+		run->failed = true;
 	}
 	// Anything the app left running in its group goes with it.
 	kill(-run->pid, SIGKILL);
@@ -264,6 +291,15 @@ bool apps_launch(const app_t *app, const char *rom, void (*on_exit)(void *), voi
 	posix_spawn_file_actions_init(&actions);
 	posix_spawnattr_init(&attr);
 	posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0);
+	// What the app prints goes to last-run.log in its own folder, overwritten each time, so
+	// that an app that stops leaves a word about why (the player's log has it only when
+	// logging is on). Without a writable folder it goes to the player's log as before.
+	char log_path[sizeof(app->dir) + 16];
+	snprintf(log_path, sizeof(log_path), "%s/last-run.log", app->dir);
+	if (access(app->dir, W_OK) == 0) {
+		posix_spawn_file_actions_addopen(&actions, 1, log_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		posix_spawn_file_actions_adddup2(&actions, 1, 2);
+	}
 	posix_spawn_file_actions_adddup2(&actions, audio[1], AUDIO_FD);
 
 	// Whatever else the player has open is not the app's to hold on to.

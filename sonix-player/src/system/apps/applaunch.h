@@ -35,7 +35,8 @@
 // The pipe is small and the write blocks, so the sound card paces the app. An
 // app with no sound simply never writes.
 //
-// The app's output and errors go to the player's log.
+// The app's output and errors go to last-run.log in its folder (or to the player's log when the
+// folder cannot be written), and when it ends with an error the player says so.
 
 #define APPS_AUDIO_MAGIC "SNXA"
 
