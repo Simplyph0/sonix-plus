@@ -11,19 +11,22 @@
 #include "src/system/core/lang.h"
 
 #include <stdint.h>
+#include <stdio.h>
 
 lv_obj_t *gearboysettings_screen;
 
 // The two pill rows: 5 palettes and 4 shaders. Same shape as the MSEB radius
 // and keyboard-type pills, but wrapped over several lines: five names do not
 // fit across 480 pixels.
-static lv_obj_t *palette_pills[5];
+static lv_obj_t *palette_pills[6];
 static lv_obj_t *shader_pills[4];
 static lv_obj_t *correction_switch;
+static lv_obj_t *fps_switch;
 static lv_obj_t *bootrom_switch;
 
-static const char *const PALETTE_NAMES[5] = {
-	"gearboy_palette_original", "gearboy_palette_sharp", "gearboy_palette_bw", "gearboy_palette_autumn", "gearboy_palette_soft",
+static const char *const PALETTE_NAMES[6] = {
+	"gearboy_palette_original", "gearboy_palette_sharp", "gearboy_palette_bw",
+	"gearboy_palette_autumn",	"gearboy_palette_soft",	 "gearboy_palette_custom",
 };
 static const char *const SHADER_NAMES[4] = {
 	"Pixel perfect", "GBC", "GBC Dot matrix", "GB Dot matrix",
@@ -33,7 +36,7 @@ static const char *const SHADER_NAMES[4] = {
 static void refresh_pills(void) {
 	int pal = (int)config_get_int("gearboy", "palette", 0);
 	int sh = (int)config_get_int("gearboy", "shader", 0);
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < 6; i++) {
 		if (!palette_pills[i]) {
 			continue;
 		}
@@ -51,6 +54,73 @@ static void refresh_pills(void) {
 		lv_obj_set_style_text_color(lv_obj_get_child(shader_pills[i], 0),
 									on ? lv_color_white() : theme()->text_primary, 0);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The custom palette: four shades, each three sliders of red, green and blue.
+// ---------------------------------------------------------------------------
+
+#define CHANNEL_STEPS 17 // 0, 16, 32 ... 240, 255
+
+static int custom_sel;
+static lv_obj_t *custom_chip[4];
+static lv_obj_t *channel_slider[3];
+static lv_obj_t *channel_value[3];
+static const char *const SHADE_NAMES[4] = {"gearboy_custom_lightest", "gearboy_custom_light", "gearboy_custom_dark",
+										   "gearboy_custom_darkest"};
+
+static int channel_to_step(int v) {
+	int s = (v + 8) / 16;
+	return s > CHANNEL_STEPS - 1 ? CHANNEL_STEPS - 1 : s;
+}
+static int step_to_channel(int s) { return s >= CHANNEL_STEPS - 1 ? 255 : s * 16; }
+
+static void refresh_custom(bool sliders_too) {
+	for (int i = 0; i < 4; i++) {
+		if (!custom_chip[i]) {
+			continue;
+		}
+		uint32_t c = gearboy_custom_colour(i);
+		lv_obj_set_style_bg_color(custom_chip[i], lv_color_hex(c), 0);
+		// text that reads on the shade it sits on
+		unsigned lum = (((c >> 16) & 255) * 30 + ((c >> 8) & 255) * 59 + (c & 255) * 11) / 100;
+		lv_obj_set_style_text_color(lv_obj_get_child(custom_chip[i], 0), lum > 140 ? lv_color_black() : lv_color_white(), 0);
+		lv_obj_set_style_border_width(custom_chip[i], i == custom_sel ? 5 : 0, 0);
+		lv_obj_set_style_border_color(custom_chip[i], theme()->accent, 0);
+	}
+	uint32_t c = gearboy_custom_colour(custom_sel);
+	int ch[3] = {(int)((c >> 16) & 255), (int)((c >> 8) & 255), (int)(c & 255)};
+	for (int k = 0; k < 3; k++) {
+		if (sliders_too && channel_slider[k]) {
+			lv_slider_set_value(channel_slider[k], channel_to_step(ch[k]), LV_ANIM_OFF);
+		}
+		if (channel_value[k]) {
+			char text[8];
+			snprintf(text, sizeof(text), "%d", step_to_channel(channel_to_step(ch[k])));
+			lv_label_set_text(channel_value[k], text);
+		}
+	}
+}
+
+static void custom_pick_cb(lv_event_t *e) {
+	custom_sel = (int)(intptr_t)lv_event_get_user_data(e);
+	refresh_custom(true);
+}
+
+static void channel_cb(lv_event_t *e) {
+	(void)e;
+	int r = step_to_channel((int)lv_slider_get_value(channel_slider[0]));
+	int g = step_to_channel((int)lv_slider_get_value(channel_slider[1]));
+	int b = step_to_channel((int)lv_slider_get_value(channel_slider[2]));
+	gearboy_set_custom_colour(custom_sel, ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b);
+	refresh_pills(); // the palette is now Custom
+	refresh_custom(false);
+}
+
+static void fps_toggle_cb(lv_event_t *e) {
+	(void)e;
+	config_set_int("gearboy", "show_fps", lv_obj_has_state(fps_switch, LV_STATE_CHECKED) ? 1 : 0);
+	config_save();
 }
 
 static void palette_pick_cb(lv_event_t *e) {
@@ -138,14 +208,32 @@ void gearboysettings_init(gui_config_t *cfg) {
 	// Palette: applies to original Game Boy games only, since GBC titles carry
 	// their own colours.
 	lv_obj_t *pal_pills = make_pill_card(container, "gearboy_palette");
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < 6; i++) {
 		palette_pills[i] = make_pill(pal_pills, PALETTE_NAMES[i], palette_pick_cb, i);
 	}
+
+	// Custom colours: pick a shade, then set its red, green and blue. Changing any of them
+	// makes the palette the custom one.
+	lv_obj_t *custom_pills = make_pill_card(container, "gearboy_custom_title");
+	for (int i = 0; i < 4; i++) {
+		custom_chip[i] = make_pill(custom_pills, SHADE_NAMES[i], custom_pick_cb, i);
+	}
+	static const char *const CHANNEL_NAMES[3] = {"gearboy_custom_red", "gearboy_custom_green", "gearboy_custom_blue"};
+	for (int k = 0; k < 3; k++) {
+		settingsrow_slider(container, CHANNEL_NAMES[k], CHANNEL_STEPS, &channel_value[k], &channel_slider[k], channel_cb);
+	}
+	refresh_custom(true);
 
 	// Shaders: the real panels' grid, drawn inside the 3x upscale.
 	lv_obj_t *sh_pills = make_pill_card(container, "gearboy_shaders");
 	for (int i = 0; i < 4; i++) {
 		shader_pills[i] = make_pill(sh_pills, SHADER_NAMES[i], shader_pick_cb, i);
+	}
+
+	// The frame counter over the picture, for finding out whether a game is keeping up.
+	settingsrow_toggle(container, "gearboy_show_fps", &fps_switch, fps_toggle_cb);
+	if (config_get_int("gearboy", "show_fps", 0) != 0) {
+		lv_obj_add_state(fps_switch, LV_STATE_CHECKED);
 	}
 
 	settingsrow_toggle(container, "gearboy_gbc_color_correction", &correction_switch, correction_toggle_cb);

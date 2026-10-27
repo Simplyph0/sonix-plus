@@ -40,6 +40,14 @@ void gamecanvas_rect(gamecanvas_t *c, int x, int y, int w, int h, uint16_t color
 void gamecanvas_round_rect(gamecanvas_t *c, int x, int y, int w, int h, int r, uint16_t color);
 void gamecanvas_circle(gamecanvas_t *c, int cx, int cy, int r, uint16_t color);
 
+// Text in a built-in 5x7 face, each of its pixels `scale` pixels square: capitals,
+// digits and the usual marks (lower case is drawn as capitals). For the numbers
+// and letters inside a grid; the games' headings and messages are labels.
+void gamecanvas_text(gamecanvas_t *c, int x, int y, const char *text, int scale, uint16_t color);
+int gamecanvas_text_width(const char *text, int scale);
+// The same, centred on (cx, cy).
+void gamecanvas_text_centered(gamecanvas_t *c, int cx, int cy, const char *text, int scale, uint16_t color);
+
 // Marks a part of the canvas as changed, to be repainted on the next refresh.
 void gamecanvas_dirty(gamecanvas_t *c, int x, int y, int w, int h);
 void gamecanvas_dirty_all(gamecanvas_t *c);

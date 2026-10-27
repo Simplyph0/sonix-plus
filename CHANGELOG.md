@@ -4,6 +4,14 @@ What changed in each release of this fork, newest first. The release page shows
 the section for its own tag, so write the section here before pushing the tag
 (see `.github/workflows/release-firmware.yml`).
 
+## v1.6 - 2026-10-27
+
+- Six new **Games**: Blocks, Mines, Rally, Sudoku, Words (offline word list) and Tic-Tac-Toe (three levels).
+- All games have a **pause** menu (resume, new game, sound on or off) and **sound effects**; best scores and times are kept on the card (`Saves/Games/scores.ini`) and shown on the start screen.
+- Lists of games show **covers** (a picture with the game's name beside it) and drop `(USA)`-style tags.
+- **FPS counter** for the Game Boy (Settings) and the NES, GBA and SNES apps (tap the picture); a **Custom** Game Boy palette with red, green and blue sliders.
+- [APPS-LIST.md](APPS-LIST.md) lists the apps that exist.
+
 ## v1.5 - 2026-10-27
 
 - Apps write a `last-run.log` in their folder, and a popup tells you when one stops on its own.

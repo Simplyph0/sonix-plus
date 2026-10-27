@@ -171,7 +171,7 @@ static uint8_t *read_file(const char *path, size_t *size) {
 // A PNG as the tile wants it: APPS_ICON_SIZE square, blue-green-red-alpha, which
 // is LVGL's ARGB8888 on this little-endian CPU. Another size is scaled to fit,
 // keeping its proportions and centred on transparent.
-static uint8_t *load_icon(const char *path) {
+uint8_t *apps_load_image(const char *path, int box) {
 	size_t size;
 	uint8_t *file = read_file(path, &size);
 	if (!file) {
@@ -189,26 +189,59 @@ static uint8_t *load_icon(const char *path) {
 		return NULL;
 	}
 
-	uint8_t *out = calloc((size_t)APPS_ICON_SIZE * APPS_ICON_SIZE, 4);
+	uint8_t *out = calloc((size_t)box * box, 4);
 	if (!out) {
 		stbi_image_free(rgba);
 		return NULL;
 	}
 	int fit = w > h ? w : h;
-	int dw = w * APPS_ICON_SIZE / fit;
-	int dh = h * APPS_ICON_SIZE / fit;
-	int ox = (APPS_ICON_SIZE - dw) / 2;
-	int oy = (APPS_ICON_SIZE - dh) / 2;
+	int dw = w * box / fit;
+	int dh = h * box / fit;
+	if (dw < 1) {
+		dw = 1;
+	}
+	if (dh < 1) {
+		dh = 1;
+	}
+	int ox = (box - dw) / 2;
+	int oy = (box - dh) / 2;
+	// Each pixel is the average of a few samples of the block of the picture it stands
+	// for (at most 4 by 4 of them), so a large cover is smooth and not a scatter of
+	// every tenth pixel.
 	for (int y = 0; y < dh; y++) {
-		int sy = y * h / dh;
+		int sy0 = y * h / dh;
+		int sy1 = (y + 1) * h / dh;
+		if (sy1 <= sy0) {
+			sy1 = sy0 + 1;
+		}
+		int ystep = (sy1 - sy0 + 3) / 4;
 		for (int x = 0; x < dw; x++) {
-			int sx = x * w / dw;
-			const uint8_t *s = rgba + ((size_t)sy * w + sx) * 4;
-			uint8_t *d = out + ((size_t)(oy + y) * APPS_ICON_SIZE + ox + x) * 4;
-			d[0] = s[2];
-			d[1] = s[1];
-			d[2] = s[0];
-			d[3] = s[3];
+			int sx0 = x * w / dw;
+			int sx1 = (x + 1) * w / dw;
+			if (sx1 <= sx0) {
+				sx1 = sx0 + 1;
+			}
+			int xstep = (sx1 - sx0 + 3) / 4;
+			unsigned sum[4] = {0, 0, 0, 0};
+			unsigned n = 0;
+			for (int sy = sy0; sy < sy1 && sy < h; sy += ystep) {
+				for (int sx = sx0; sx < sx1 && sx < w; sx += xstep) {
+					const uint8_t *s = rgba + ((size_t)sy * w + sx) * 4;
+					// weighted by alpha, so a see-through edge does not darken the colour
+					sum[0] += (unsigned)s[0] * s[3];
+					sum[1] += (unsigned)s[1] * s[3];
+					sum[2] += (unsigned)s[2] * s[3];
+					sum[3] += s[3];
+					n++;
+				}
+			}
+			uint8_t *d = out + ((size_t)(oy + y) * box + ox + x) * 4;
+			if (n && sum[3]) {
+				d[0] = (uint8_t)(sum[2] / sum[3]); // blue
+				d[1] = (uint8_t)(sum[1] / sum[3]);
+				d[2] = (uint8_t)(sum[0] / sum[3]); // red
+				d[3] = (uint8_t)(sum[3] / n);
+			}
 		}
 	}
 	stbi_image_free(rgba);
@@ -278,7 +311,7 @@ int apps_scan(const char *sd_root) {
 		if (names.icon_name[0] && safe_relative(names.icon_name)) {
 			char icon_path[780];
 			snprintf(icon_path, sizeof(icon_path), "%s/%s", app_dir, names.icon_name);
-			app->icon = load_icon(icon_path);
+			app->icon = apps_load_image(icon_path, APPS_ICON_SIZE);
 			if (app->icon) {
 				app->icon_w = APPS_ICON_SIZE;
 				app->icon_h = APPS_ICON_SIZE;

@@ -130,12 +130,13 @@ The MIPS toolchain that `make target` builds makes them.
 
 The three emulators are the SDK's libretro frontend with a core linked in. They put the game on the
 top of the screen and a pad below it, keep battery saves in `Saves/<system>/` and one save state per
-game, and list the files of `Games/NES`, `Games/GBA` or `Games/SNES`. The GBA and SNES apps have
-been run with test ROMs on a computer, not on a player yet.
+game, and list the files of `Games/NES`, `Games/GBA` or `Games/SNES`. A picture with the same name as a
+game, in its folder, is the game's cover in the list; a tap on the picture shows or hides an FPS counter.
+[APPS-LIST.md](APPS-LIST.md) is the list of apps that exist.
 
 ## Built in
 
 Some things are in the firmware itself, because they use the player's own interface:
 
-- **Games**: Flappy Bird, Snake, 2048 and Breakout.
+- **Games**: Flappy Bird, Snake, 2048, Breakout, Blocks, Mines, Rally, Sudoku, Words and Tic-Tac-Toe.
 - **Emulators**: Game Boy and Game Boy Color (Gearboy).

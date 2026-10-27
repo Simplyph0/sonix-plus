@@ -17,6 +17,7 @@
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/topbar.h"
 #include "src/gui/shell/volume_overlay.h"
+#include "src/system/core/config.h"
 #include "src/system/gearboy/gbinput.h"
 #include "src/system/gearboy/gearboy.h"
 #include "src/system/core/lang.h"
@@ -156,6 +157,11 @@ static bool pill_row;
 static int pill_y;
 
 static lv_obj_t *game_image;
+// The optional frame counter over the picture's corner (Settings > Show FPS counter).
+static lv_obj_t *fps_label;
+static bool show_fps;
+static uint32_t fps_stamp;
+static uint32_t fps_frames;
 static lv_obj_t *pause_veil;
 static lv_obj_t *veil_label;
 static lv_obj_t *controls_bg;
@@ -701,6 +707,26 @@ static void poll_cb(lv_timer_t *timer) {
 	}
 	set_veil(VEIL_GONE);
 
+	// The frame counter: frames emulated over the last second or so, which is what the
+	// game runs at, 59.7 when all is well.
+	if (show_fps && fps_label) {
+		uint32_t now = lv_tick_get();
+		if (fps_stamp == 0 || frames < fps_frames) {
+			fps_stamp = now;
+			fps_frames = frames;
+		} else if (now - fps_stamp >= 1000) {
+			char text[24];
+			unsigned tenths = (unsigned)((uint64_t)(frames - fps_frames) * 10000 / (now - fps_stamp));
+			snprintf(text, sizeof(text), "%u.%u FPS", tenths / 10, tenths % 10);
+			lv_label_set_text(fps_label, text);
+			fps_stamp = now;
+			fps_frames = frames;
+		}
+		lv_obj_set_hidden(fps_label, false);
+	} else if (fps_label) {
+		lv_obj_set_hidden(fps_label, true);
+	}
+
 	// Redraw only on a new frame. The counter is the only thing the interface
 	// reads from the emulator thread, and without this comparison LVGL would
 	// recompose 480x432 even when the pixels are identical -- exactly the
@@ -755,6 +781,8 @@ static void screen_loaded_cb(lv_event_t *e) {
 	// to try the page and not enough to play.
 	grab_glass();
 
+	show_fps = config_get_int("gearboy", "show_fps", 0) != 0;
+	fps_stamp = 0;
 	last_frame = 0;
 	veil_state = VEIL_GONE;
 	set_veil(VEIL_STARTING);
@@ -874,6 +902,18 @@ void gearboyplay_init(gui_config_t *cfg) {
 	lv_obj_set_pos(game_image, 0, SCREEN_TOP);
 	lv_obj_set_size(game_image, GAME_W, GAME_H);
 	lv_obj_set_hidden(game_image, true);
+
+	fps_label = lv_label_create(gearboyplay_screen);
+	lv_label_set_text(fps_label, "");
+	lv_obj_set_style_text_font(fps_label, &font_ui_18, 0);
+	lv_obj_set_style_text_color(fps_label, lv_color_make(150, 255, 120), 0);
+	lv_obj_set_style_bg_color(fps_label, lv_color_black(), 0);
+	lv_obj_set_style_bg_opa(fps_label, LV_OPA_60, 0);
+	lv_obj_set_style_pad_all(fps_label, 4, 0);
+	lv_obj_set_style_radius(fps_label, 6, 0);
+	lv_obj_set_clickable(fps_label, false);
+	lv_obj_set_pos(fps_label, 6, SCREEN_TOP + 6);
+	lv_obj_set_hidden(fps_label, true);
 
 	// Select and Start in the picture corners, when there is no row for them.
 	// Invisible: the objects exist only for the simulator, which has no

@@ -117,6 +117,30 @@ void gamecanvas_circle(gamecanvas_t *c, int cx, int cy, int r, uint16_t color) {
 	gamecanvas_round_rect(c, cx - r, cy - r, r * 2, r * 2, r, color);
 }
 
+#include "gamefont_table.h"
+
+int gamecanvas_text_width(const char *text, int scale) {
+	int n = (int)strlen(text);
+	return n > 0 ? (n * 6 - 1) * scale : 0;
+}
+
+void gamecanvas_text(gamecanvas_t *c, int x, int y, const char *text, int scale, uint16_t color) {
+	for (const char *p = text; *p; p++, x += 6 * scale) {
+		const uint8_t *glyph = gamefont_[(unsigned char)*p & 127];
+		for (int row = 0; row < 7; row++) {
+			for (int col = 0; col < 5; col++) {
+				if (glyph[row] & (0x10 >> col)) {
+					gamecanvas_rect(c, x + col * scale, y + row * scale, scale, scale, color);
+				}
+			}
+		}
+	}
+}
+
+void gamecanvas_text_centered(gamecanvas_t *c, int cx, int cy, const char *text, int scale, uint16_t color) {
+	gamecanvas_text(c, cx - gamecanvas_text_width(text, scale) / 2, cy - 7 * scale / 2, text, scale, color);
+}
+
 void gamecanvas_dirty(gamecanvas_t *c, int x, int y, int w, int h) {
 	if (!c->image) {
 		return;

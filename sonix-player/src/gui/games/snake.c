@@ -9,6 +9,7 @@
 
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/games/gamecanvas.h"
+#include "src/gui/games/gamekit.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
@@ -51,8 +52,7 @@ static const int DY[4] = {-1, 0, 1, 0};
 
 static gui_config_t *g_cfg;
 static gamecanvas_t canvas;
-static lv_obj_t *score_label;
-static lv_obj_t *message;
+static gk_ui_t ui;
 static lv_timer_t *step_timer;
 static int rows;
 
@@ -130,23 +130,7 @@ static void paint_all(void) {
 	}
 }
 
-static void update_score(void) {
-	char text[64];
-	snprintf(text, sizeof(text), "%s %d   %s %d", tr("game_score"), score, tr("game_best"), best);
-	lv_label_set_text(score_label, text);
-}
-
-static void show_message(const char *key, const char *second) {
-	char text[160];
-	if (second) {
-		snprintf(text, sizeof(text), "%s\n%s", tr(key), tr(second));
-	} else {
-		snprintf(text, sizeof(text), "%s", tr(key));
-	}
-	lv_label_set_text(message, text);
-	lv_obj_set_hidden(message, false);
-	lv_obj_align(message, LV_ALIGN_CENTER, 0, 0);
-}
+static void update_score(void) { gk_ui_score_best(&ui, score, best > score ? best : score); }
 
 static void place_food(void) {
 	int free_cells = rows * COLS - length;
@@ -191,11 +175,11 @@ static void new_game(void) {
 	lv_timer_pause(step_timer);
 	paint_all();
 	update_score();
-	show_message("game_tap_start", "snake_hint");
+	gk_ui_message_ready(&ui, "game_tap_start", "snake_hint", best, 0);
 }
 
 static void start_play(void) {
-	lv_obj_set_hidden(message, true);
+	gk_ui_message_hide(&ui);
 	state = ST_PLAY;
 	lv_timer_resume(step_timer);
 	lv_timer_reset(step_timer);
@@ -205,14 +189,14 @@ static void die(void) {
 	state = ST_DEAD;
 	lv_timer_pause(step_timer);
 	died_at = lv_tick_get();
-	if (score > best) {
+	bool new_best = highscore_submit("snake", score, false);
+	if (new_best) {
 		best = score;
-		config_set_int("snake", "best", best);
-		config_save();
 	}
+	gamesound_play(SND_LOSE);
 	paint_cell(body_at(0).x, body_at(0).y);
 	update_score();
-	show_message("game_over", "game_tap_again");
+	gk_ui_message_over(&ui, score, new_best, 0);
 }
 
 static dir_t last_direction(void) { return queued_count > 0 ? queued[queued_count - 1] : heading; }
@@ -271,6 +255,7 @@ static void step_cb(lv_timer_t *timer) {
 
 	if (eats) {
 		score++;
+		gamesound_play(SND_EAT);
 		int period = STEP_START_MS - score * STEP_PER_APPLE_MS;
 		lv_timer_set_period(step_timer, period < STEP_FASTEST_MS ? STEP_FASTEST_MS : (uint32_t)period);
 		place_food();
@@ -395,10 +380,11 @@ static void screen_loaded_cb(lv_event_t *e) {
 	}
 	lv_obj_move_background(canvas.image);
 
-	best = (int)config_get_int("snake", "best", 0);
+	best = (int)highscore_get("snake");
 	srand((unsigned)time(NULL));
 	step_timer = lv_timer_create(step_cb, STEP_START_MS, NULL);
 	lv_timer_pause(step_timer);
+	gamesound_open();
 	new_game();
 	power_hold_screen_on(true); // a game is played with the screen on and nobody touching it
 }
@@ -410,41 +396,41 @@ static void screen_unloaded_cb(lv_event_t *e) {
 		step_timer = NULL;
 	}
 	gamecanvas_destroy(&canvas);
+	gamesound_close();
+	gk_ui_reset(&ui);
 	free(body);
 	free(occupied);
 	body = NULL;
 	occupied = NULL;
-	lv_obj_set_hidden(message, true);
 	power_hold_screen_on(false);
+}
+
+// The pause menu: the game stands still while it is up.
+static void pause_cb(bool paused, void *user) {
+	(void)user;
+	if (!step_timer) {
+		return;
+	}
+	if (paused) {
+		lv_timer_pause(step_timer);
+	} else if (state == ST_PLAY) {
+		lv_timer_resume(step_timer);
+		lv_timer_reset(step_timer);
+	}
+}
+
+static void restart_cb(void *user) {
+	(void)user;
+	if (step_timer) {
+		new_game();
+	}
 }
 
 void snake_init(gui_config_t *cfg) {
 	g_cfg = cfg;
 	load_colours();
 
-	lv_obj_add_style(snake_screen, &theme_style_screen, 0);
-	lv_obj_set_scrollable(snake_screen, false);
-	lv_obj_t *title = settingsrow_title(snake_screen, cfg, "snake");
-	settingsrow_title_corner_slots(title, cfg, 3);
-
-	// The score on the heading's line, at the right.
-	score_label = lv_label_create(snake_screen);
-	lv_obj_add_style(score_label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(score_label, &font_ui_24_bold, 0);
-	lv_obj_set_style_text_align(score_label, LV_TEXT_ALIGN_RIGHT, 0);
-	lv_obj_set_width(score_label, 250);
-	lv_obj_align(score_label, LV_ALIGN_TOP_RIGHT, -(int)cfg->padding, (int)cfg->top_bar_height + (int)cfg->padding + 16);
-	lv_label_set_text(score_label, "");
-
-	message = lv_label_create(snake_screen);
-	lv_obj_set_style_text_font(message, &font_ui_32, 0);
-	lv_obj_set_style_text_color(message, lv_color_white(), 0);
-	lv_obj_set_style_text_align(message, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_bg_color(message, lv_color_black(), 0);
-	lv_obj_set_style_bg_opa(message, LV_OPA_60, 0);
-	lv_obj_set_style_pad_all(message, 18, 0);
-	lv_obj_set_style_radius(message, 16, 0);
-	lv_obj_set_hidden(message, true);
+	gk_ui_build(&ui, snake_screen, cfg, "snake", pause_cb, restart_cb, NULL);
 
 	lv_obj_add_event_cb(snake_screen, pressed_cb, LV_EVENT_PRESSED, NULL);
 	lv_obj_add_event_cb(snake_screen, pressing_cb, LV_EVENT_PRESSING, NULL);

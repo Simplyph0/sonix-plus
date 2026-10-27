@@ -81,6 +81,12 @@ const app_t *apps_at(int index);
 // The apps that go in `folder`, in name order. Returns how many were written.
 int apps_in_folder(app_folder_t folder, const app_t **out, int max);
 
+// A PNG, JPEG or GIF as LVGL's ARGB8888, `size` pixels square: another shape is scaled
+// to fit, keeping its proportions and centred on transparent. malloc'd, free() it;
+// NULL when the file cannot be read or is not an image the decoder takes. Used for the
+// tiles and for the covers in the lists of games.
+uint8_t *apps_load_image(const char *path, int size);
+
 // Whether a file name has one of the app's rom_ext extensions ("nes" against
 // "nes,zip"), ignoring case. True for any name when the app lists none.
 bool apps_rom_matches(const app_t *app, const char *file_name);

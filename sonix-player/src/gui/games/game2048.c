@@ -8,6 +8,7 @@
 #include "lvgl/lvgl.h"
 
 #include "src/gui/fonts/fonts.h"
+#include "src/gui/games/gamekit.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
@@ -40,6 +41,8 @@ static lv_obj_t *board;
 static lv_obj_t *score_label;
 static lv_obj_t *best_label;
 static lv_obj_t *message;
+static gk_ui_t ui;
+static bool best_dirty; // the best has grown and is not on the card yet
 static int cell_size;
 static tile_t tiles[N * N];
 static int tile_count;
@@ -202,6 +205,14 @@ static void update_scores(void) {
 	lv_label_set_text(best_label, text);
 }
 
+// Puts a best that has grown on the card.
+static void flush_best(void) {
+	if (best_dirty) {
+		best_dirty = false;
+		highscore_set("game2048", best);
+	}
+}
+
 static bool can_move(void) {
 	for (int r = 0; r < N; r++) {
 		for (int c = 0; c < N; c++) {
@@ -227,6 +238,7 @@ static void show_message(const char *key) {
 }
 
 static void new_game(void) {
+	flush_best();
 	clear_tiles();
 	score = 0;
 	won = false;
@@ -243,6 +255,7 @@ static void new_game(void) {
 // Called when every tile has stopped: the ones that slid under another are gone,
 // the other doubled, and a new tile comes in.
 static void finish_move(void) {
+	int merged = 0;
 	// The tiles that were swallowed go; what survives is compacted so that tile
 	// indices keep meaning something.
 	for (int i = 0; i < tile_count; i++) {
@@ -272,6 +285,7 @@ static void finish_move(void) {
 		grid[t->row][t->col] = i;
 		if (t->grows) {
 			t->grows = false;
+			merged++;
 			t->value *= 2;
 			score += t->value;
 			style_tile(t);
@@ -281,10 +295,12 @@ static void finish_move(void) {
 			}
 		}
 	}
+	if (merged > 0) {
+		gamesound_play(SND_MERGE);
+	}
 	if (score > best) {
 		best = score;
-		config_set_int("game2048", "best", best);
-		config_save();
+		best_dirty = true; // written when the game ends or is left, not at every move
 	}
 	update_scores();
 	spawn();
@@ -292,10 +308,13 @@ static void finish_move(void) {
 
 	if (!can_move()) {
 		over = true;
+		flush_best();
+		gamesound_play(SND_LOSE);
 		show_message("game_over");
 	} else if (won && !win_announced) {
 		// Said once, and then the game goes on.
 		win_announced = true;
+		gamesound_play(SND_WIN);
 		show_message("game2048_win");
 	}
 }
@@ -387,6 +406,7 @@ static void do_move(move_t m) {
 	}
 
 	animating = true;
+	gamesound_play(SND_TICK);
 	pending_anims = 0;
 	for (int i = 0; i < tile_count; i++) {
 		tile_t *t = &tiles[i];
@@ -487,15 +507,27 @@ static lv_obj_t *score_box(lv_obj_t *parent, const char *caption_key, int x, lv_
 
 static void screen_loaded_cb(lv_event_t *e) {
 	(void)e;
-	best = (int)config_get_int("game2048", "best", 0);
+	best = (int)highscore_get("game2048");
+	best_dirty = false;
 	srand((unsigned)time(NULL));
+	gamesound_open();
 	new_game();
 }
 
 static void screen_unloaded_cb(lv_event_t *e) {
 	(void)e;
+	flush_best();
 	clear_tiles();
 	lv_obj_set_hidden(message, true);
+	gamesound_close();
+	gk_ui_reset(&ui);
+}
+
+// The pause menu: nothing here runs on a timer, so there is nothing to stop; the menu
+// covers the board and takes the touches.
+static void restart_cb(void *user) {
+	(void)user;
+	new_game();
 }
 
 void game2048_init(gui_config_t *cfg) {
@@ -510,7 +542,8 @@ void game2048_init(gui_config_t *cfg) {
 	lv_obj_t *title = settingsrow_title(game2048_screen, cfg, "game2048");
 	settingsrow_title_corner_slots(title, cfg, 3);
 
-	int right = (int)cfg->screen_width - margin;
+	// The pause button has the corner; the two scores sit to the left of it.
+	int right = (int)cfg->screen_width - margin - 62;
 	score_box(game2048_screen, "game_best", right - 100, &best_label);
 	score_box(game2048_screen, "game_score", right - 100 - 8 - 100, &score_label);
 
@@ -563,6 +596,8 @@ void game2048_init(gui_config_t *cfg) {
 	lv_obj_set_style_radius(message, 16, 0);
 	lv_obj_set_clickable(message, false);
 	lv_obj_set_hidden(message, true);
+
+	gk_ui_attach_pause(&ui, game2048_screen, cfg, NULL, restart_cb, NULL);
 
 	lv_obj_add_event_cb(game2048_screen, pressed_cb, LV_EVENT_PRESSED, NULL);
 	lv_obj_add_event_cb(game2048_screen, released_cb, LV_EVENT_RELEASED, NULL);

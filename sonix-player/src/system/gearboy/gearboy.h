@@ -111,4 +111,11 @@ int gearboy_take_state_result(void);
 // take effect from the next game.
 void gearboy_refresh_video_settings(void);
 
+// The palette that is the sixth choice, "Custom": four colours as 0xRRGGBB, index 0 the
+// lightest and 3 the darkest. Kept in config ([gearboy] custom0..custom3), starting as
+// the Soft palette. gearboy_set_custom_colour() stores one and applies the palette.
+#define GEARBOY_PALETTE_CUSTOM 5
+uint32_t gearboy_custom_colour(int index);
+void gearboy_set_custom_colour(int index, uint32_t rgb);
+
 #endif /* GEARBOY_H */

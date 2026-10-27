@@ -452,6 +452,12 @@ COLOR_ICONS = [
     ("snake.png", "menu_snake", SECTION_ICON_SIZE),
     ("game2048.png", "menu_game2048", SECTION_ICON_SIZE),
     ("breakout.png", "menu_breakout", SECTION_ICON_SIZE),
+    ("blocks.png", "menu_blocks", SECTION_ICON_SIZE),
+    ("mines.png", "menu_mines", SECTION_ICON_SIZE),
+    ("rally.png", "menu_rally", SECTION_ICON_SIZE),
+    ("sudoku.png", "menu_sudoku", SECTION_ICON_SIZE),
+    ("words.png", "menu_words", SECTION_ICON_SIZE),
+    ("tictactoe.png", "menu_tictactoe", SECTION_ICON_SIZE),
     ("app.png", "menu_app", SECTION_ICON_SIZE),
     ("terminal.png", "menu_terminal", SECTION_ICON_SIZE),
 

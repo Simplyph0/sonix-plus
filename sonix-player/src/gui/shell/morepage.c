@@ -9,9 +9,15 @@
 #include "src/gui/calculator/calculatorpage.h"
 #include "src/gui/ebook/ebookpage.h"
 #include "src/gui/flappybird/flappybird.h"
+#include "src/gui/games/blocks.h"
 #include "src/gui/games/breakout.h"
 #include "src/gui/games/game2048.h"
+#include "src/gui/games/mines.h"
+#include "src/gui/games/rally.h"
 #include "src/gui/games/snake.h"
+#include "src/gui/games/sudoku.h"
+#include "src/gui/games/tictactoe.h"
+#include "src/gui/games/words.h"
 #include "src/gui/library/filespage.h"
 #include "src/gui/gearboy/gearboypage.h"
 #include "src/gui/shell/gridpage.h"
@@ -31,6 +37,12 @@ static const grid_entry_t games_entries[] = {
 	{"snake", &icon_menu_snake, &snake_screen, NULL},
 	{"game2048", &icon_menu_game2048, &game2048_screen, NULL},
 	{"breakout", &icon_menu_breakout, &breakout_screen, NULL},
+	{"blocks", &icon_menu_blocks, &blocks_screen, NULL},
+	{"mines", &icon_menu_mines, &mines_screen, NULL},
+	{"rally", &icon_menu_rally, &rally_screen, NULL},
+	{"sudoku", &icon_menu_sudoku, &sudoku_screen, NULL},
+	{"words", &icon_menu_words, &words_screen, NULL},
+	{"tictactoe", &icon_menu_tictactoe, &tictactoe_screen, NULL},
 };
 
 static const grid_entry_t emulators_entries[] = {

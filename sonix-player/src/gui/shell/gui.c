@@ -65,9 +65,16 @@
 #include "src/gui/audio/metronomepage.h"
 #include "src/gui/calculator/calculatorpage.h"
 #include "src/gui/apps/applauncherui.h"
+#include "src/gui/games/blocks.h"
 #include "src/gui/games/breakout.h"
 #include "src/gui/games/game2048.h"
+#include "src/gui/games/highscore.h"
+#include "src/gui/games/mines.h"
+#include "src/gui/games/rally.h"
 #include "src/gui/games/snake.h"
+#include "src/gui/games/sudoku.h"
+#include "src/gui/games/tictactoe.h"
+#include "src/gui/games/words.h"
 #include "src/gui/apps/rompage.h"
 #include "src/gui/terminal/terminalpage.h"
 #include "src/system/bluetooth/btreceiver.h"
@@ -642,6 +649,12 @@ void gui_init(gui_config_t *cfg) {
 	snake_screen = lv_obj_create(NULL);
 	game2048_screen = lv_obj_create(NULL);
 	breakout_screen = lv_obj_create(NULL);
+	blocks_screen = lv_obj_create(NULL);
+	mines_screen = lv_obj_create(NULL);
+	rally_screen = lv_obj_create(NULL);
+	sudoku_screen = lv_obj_create(NULL);
+	words_screen = lv_obj_create(NULL);
+	tictactoe_screen = lv_obj_create(NULL);
 	filespage_screen = lv_obj_create(NULL);
 	textview_screen = lv_obj_create(NULL);
 	imageview_screen = lv_obj_create(NULL);
@@ -709,7 +722,14 @@ void gui_init(gui_config_t *cfg) {
 	ebookpage_init(cfg);
 	snake_init(cfg);
 	game2048_init(cfg);
+	highscore_init(&cfg->sd_root_path);
 	breakout_init(cfg);
+	blocks_init(cfg);
+	mines_init(cfg);
+	rally_init(cfg);
+	sudoku_init(cfg);
+	words_init(cfg);
+	tictactoe_init(cfg);
 	applauncherui_init(cfg);
 	rompage_init(cfg);
 	morepage_init(cfg);

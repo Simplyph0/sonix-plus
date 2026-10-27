@@ -30,6 +30,14 @@ void gearboy_request_savestate(void) {}
 void gearboy_request_loadstate(void) {}
 int gearboy_take_state_result(void) { return 0; }
 void gearboy_refresh_video_settings(void) {}
+uint32_t gearboy_custom_colour(int index) {
+	(void)index;
+	return 0;
+}
+void gearboy_set_custom_colour(int index, uint32_t rgb) {
+	(void)index;
+	(void)rgb;
+}
 
 #else
 
@@ -149,9 +157,41 @@ static volatile bool want_video_settings;
 
 static int clamp_setting(long v, int max) { return v < 0 ? 0 : v > max ? max : (int)v; }
 
+static const char *const CUSTOM_KEYS[4] = {"custom0", "custom1", "custom2", "custom3"};
+
+uint32_t gearboy_custom_colour(int index) {
+	if (index < 0 || index > 3) {
+		return 0;
+	}
+	const uint8_t *soft = GB_PALETTES[4][index];
+	long fallback = ((long)soft[0] << 16) | ((long)soft[1] << 8) | soft[2];
+	return (uint32_t)config_get_int("gearboy", CUSTOM_KEYS[index], fallback) & 0xFFFFFF;
+}
+
+void gearboy_set_custom_colour(int index, uint32_t rgb) {
+	if (index < 0 || index > 3) {
+		return;
+	}
+	config_set_int("gearboy", CUSTOM_KEYS[index], (long)(rgb & 0xFFFFFF));
+	config_set_int("gearboy", "palette", GEARBOY_PALETTE_CUSTOM);
+	config_save();
+	gearboy_refresh_video_settings();
+}
+
 static void apply_core_video_settings(gb_core_t *core) {
-	int pal = clamp_setting(config_get_int("gearboy", "palette", 0), 4);
-	gb_core_set_dmg_palette(core, GB_PALETTES[pal]);
+	int pal = clamp_setting(config_get_int("gearboy", "palette", 0), GEARBOY_PALETTE_CUSTOM);
+	if (pal == GEARBOY_PALETTE_CUSTOM) {
+		uint8_t custom[4][3];
+		for (int i = 0; i < 4; i++) {
+			uint32_t v = gearboy_custom_colour(i);
+			custom[i][0] = (uint8_t)(v >> 16);
+			custom[i][1] = (uint8_t)(v >> 8);
+			custom[i][2] = (uint8_t)v;
+		}
+		gb_core_set_dmg_palette(core, custom);
+	} else {
+		gb_core_set_dmg_palette(core, GB_PALETTES[pal]);
+	}
 	gb_core_set_color_correction(core, config_get_int("gearboy", "gbc_correction", 1) != 0);
 }
 

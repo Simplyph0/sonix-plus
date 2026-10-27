@@ -7,6 +7,7 @@
 
 #include "lvgl/lvgl.h"
 
+#include "src/gui/apps/coverlist.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/gearboy/gearboyplay.h"
 #include "src/gui/gearboy/gearboysettings.h"
@@ -67,8 +68,15 @@ static void open_rom_cb(lv_event_t *e) {
 //
 // The name is not a UI label, it comes from the cartridge database. tr() passes
 // it through unchanged, since a missing key returns the string it was given.
-static void add_row(int index) {
-	settingsrow_action(list_box, roms[index].name, open_rom_cb, (void *)(intptr_t)index);
+static void add_row(int index, bool covers) {
+	char shown[128];
+	coverlist_display_name(roms[index].name, shown, sizeof(shown));
+	if (covers) {
+		// a picture with the game's name beside it is its cover
+		coverlist_row(list_box, shown, roms[index].path, open_rom_cb, (void *)(intptr_t)index);
+	} else {
+		settingsrow_action(list_box, shown, open_rom_cb, (void *)(intptr_t)index);
+	}
 }
 
 static void refresh_view_buttons(void) {
@@ -87,11 +95,18 @@ static void refresh_view_buttons(void) {
 
 static void rebuild_rows(void) {
 	lv_obj_clean(list_box);
+	coverlist_begin();
+
+	// Rows with a place for a cover when any of these games has one, plain rows when none does.
+	bool covers = false;
+	for (int i = 0; i < rom_count && !covers; i++) {
+		covers = roms[i].color == show_color && coverlist_has_cover(roms[i].path);
+	}
 
 	int shown = 0;
 	for (int i = 0; i < rom_count; i++) {
 		if (roms[i].color == show_color) {
-			add_row(i);
+			add_row(i, covers);
 			shown++;
 		}
 	}
@@ -214,6 +229,14 @@ static void screen_loaded_cb(lv_event_t *e) {
 	start_scan();
 }
 
+// The pictures are freed when the page is left, with the rows that show them; they are built
+// again when it is shown.
+static void screen_unloaded_cb(lv_event_t *e) {
+	(void)e;
+	lv_obj_clean(list_box);
+	coverlist_end();
+}
+
 // The top-right gear, like the one on the Music page: opens Gearboy settings.
 static void open_settings_cb(lv_event_t *e) {
 	(void)e;
@@ -299,5 +322,6 @@ void gearboypage_init(gui_config_t *cfg) {
 	theme_register_refresh(refresh_view_buttons);
 
 	lv_obj_add_event_cb(gearboypage_screen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
+	lv_obj_add_event_cb(gearboypage_screen, screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
 	switcher_attach_back_gesture(gearboypage_screen);
 }

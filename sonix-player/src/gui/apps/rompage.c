@@ -11,6 +11,7 @@
 #include "lvgl/lvgl.h"
 
 #include "src/gui/apps/applauncherui.h"
+#include "src/gui/apps/coverlist.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
@@ -29,13 +30,16 @@ static app_t current;
 
 typedef struct {
 	char path[640];
-	char name[128];
+	char name[128];	   // the file's name, without its extension
+	char display[128]; // what the list shows
 } rom_t;
 
 static rom_t *roms;
 static int rom_count;
 
-static int by_name(const void *a, const void *b) { return strcasecmp(((const rom_t *)a)->name, ((const rom_t *)b)->name); }
+static int by_display(const void *a, const void *b) {
+	return strcasecmp(((const rom_t *)a)->display, ((const rom_t *)b)->display);
+}
 
 static void scan(const char *dir_path, int depth) {
 	DIR *dir = opendir(dir_path);
@@ -67,6 +71,7 @@ static void scan(const char *dir_path, int depth) {
 			if (dot) {
 				*dot = '\0'; // the name without its extension
 			}
+			coverlist_display_name(r->name, r->display, sizeof(r->display));
 		}
 	}
 	closedir(dir);
@@ -110,16 +115,18 @@ void rompage_open(const app_t *app) {
 	snprintf(dir, sizeof(dir), "%s/%s", g_cfg->sd_root_path, app->rom_dir);
 	make_rom_dir(dir);
 
+	lv_obj_clean(container); // the old rows go before the covers they were showing
+	coverlist_begin();
 	free(roms);
 	roms = malloc(sizeof(*roms) * ROMS_MAX);
 	rom_count = 0;
 	if (roms) {
 		scan(dir, 0);
-		qsort(roms, (size_t)rom_count, sizeof(*roms), by_name);
+		// "Pokemon Gold (USA)" and "pokemon gold" stand together: sorted by what is shown
+		qsort(roms, (size_t)rom_count, sizeof(*roms), by_display);
 	}
 
 	lv_label_set_text(settingsrow_page_title(rompage_screen), app->name);
-	lv_obj_clean(container);
 
 	if (rom_count == 0) {
 		lv_obj_t *note = lv_label_create(container);
@@ -131,20 +138,41 @@ void rompage_open(const app_t *app) {
 		snprintf(text, sizeof(text), tr("apps_no_files"), app->rom_exts[0] ? app->rom_exts : "*", app->rom_dir);
 		lv_label_set_text(note, text);
 	}
+
+	// With a cover anywhere the rows all have a place for one; without, they are the plain rows
+	// of every other list.
+	bool covers = false;
+	for (int i = 0; i < rom_count && !covers; i++) {
+		covers = coverlist_has_cover(roms[i].path);
+	}
 	for (int i = 0; i < rom_count; i++) {
 		char *path = strdup(roms[i].path);
 		if (!path) {
 			break;
 		}
-		lv_obj_t *row = settingsrow_action(container, roms[i].name, row_cb, path);
+		lv_obj_t *row;
+		if (covers) {
+			row = coverlist_row(container, roms[i].display, roms[i].path, row_cb, path);
+		} else {
+			row = settingsrow_action(container, roms[i].display, row_cb, path);
+			settingsrow_name_lines(row, 2);
+		}
 		lv_obj_add_event_cb(row, row_free_cb, LV_EVENT_DELETE, path);
-		settingsrow_name_lines(row, 2);
 	}
 
 	switch_screen(rompage_screen);
 }
 
+// The pictures go when the page does (they stay while a game runs from it: sixty of them
+// are a megabyte and a half).
+static void unloaded_cb(lv_event_t *e) {
+	(void)e;
+	lv_obj_clean(container); // the rows that show them go first
+	coverlist_end();
+}
+
 void rompage_init(gui_config_t *cfg) {
 	g_cfg = cfg;
 	container = settingsrow_page(rompage_screen, cfg, "apps");
+	lv_obj_add_event_cb(rompage_screen, unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
 }

@@ -10,6 +10,7 @@
 
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/games/gamecanvas.h"
+#include "src/gui/games/gamekit.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
@@ -51,9 +52,7 @@ typedef enum {
 
 static gui_config_t *g_cfg;
 static gamecanvas_t canvas;
-static lv_obj_t *score_label;
-static lv_obj_t *lives_label;
-static lv_obj_t *message;
+static gk_ui_t ui;
 static lv_timer_t *tick_timer;
 static int field_w;
 static int field_h;
@@ -156,23 +155,11 @@ static void redraw_all(void) {
 }
 
 static void update_labels(void) {
-	char text[64];
-	snprintf(text, sizeof(text), "%s %d   %s %d", tr("game_score"), score, tr("game_best"), best);
-	lv_label_set_text(score_label, text);
-	snprintf(text, sizeof(text), "%s %d", tr("game_lives"), lives);
-	lv_label_set_text(lives_label, text);
-}
-
-static void show_message(const char *key, const char *second) {
-	char text[160];
-	if (second) {
-		snprintf(text, sizeof(text), "%s\n%s", tr(key), tr(second));
-	} else {
-		snprintf(text, sizeof(text), "%s", tr(key));
-	}
-	lv_label_set_text(message, text);
-	lv_obj_set_hidden(message, false);
-	lv_obj_align(message, LV_ALIGN_CENTER, 0, 60);
+	char a[40];
+	char b[40];
+	snprintf(a, sizeof(a), "%s %d", tr("game_score"), score);
+	snprintf(b, sizeof(b), "%s %d", tr("game_lives"), lives);
+	gk_ui_score(&ui, a, b);
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +180,7 @@ static void serve_ready(void) {
 	ball_x = paddle_x;
 	ball_y = paddle_y() - BALL_R - 1;
 	vx = vy = 0;
-	lv_obj_set_hidden(message, true);
+	gk_ui_message_hide(&ui);
 }
 
 static void new_game(void) {
@@ -206,7 +193,7 @@ static void new_game(void) {
 	serve_ready();
 	redraw_all();
 	update_labels();
-	show_message("game_tap_serve", NULL);
+	gk_ui_message_ready(&ui, "game_tap_serve", NULL, best, 60);
 }
 
 static void launch(void) {
@@ -216,7 +203,7 @@ static void launch(void) {
 	vy = -speed * cosf(angle);
 	state = ST_PLAY;
 	last_tick = lv_tick_get();
-	lv_obj_set_hidden(message, true);
+	gk_ui_message_hide(&ui);
 }
 
 static void lose_life(void) {
@@ -225,18 +212,19 @@ static void lose_life(void) {
 	if (lives <= 0) {
 		state = ST_OVER;
 		over_at = lv_tick_get();
-		if (score > best) {
+		bool new_best = highscore_submit("breakout", score, false);
+		if (new_best) {
 			best = score;
-			config_set_int("breakout", "best", best);
-			config_save();
 		}
+		gamesound_play(SND_LOSE);
 		update_labels();
-		show_message("game_over", "game_tap_again");
+		gk_ui_message_over(&ui, score, new_best, 60);
 		return;
 	}
+	gamesound_play(SND_ERROR);
 	serve_ready();
 	redraw_all();
-	show_message("game_tap_serve", NULL);
+	gk_ui_message(&ui, tr("game_tap_serve"), 60);
 }
 
 static void normalize_speed(void) {
@@ -271,6 +259,7 @@ static bool hit_bricks(float prev_x, float prev_y) {
 				continue;
 			}
 			alive[r][c] = false;
+			gamesound_play(SND_BRICK);
 			bricks_left--;
 			score += (BRICK_ROWS - r) * 10;
 			if (speed < SPEED_MAX && (bricks_left % 10) == 0) {
@@ -302,13 +291,16 @@ static void step(float dt) {
 	if (ball_x < BALL_R) {
 		ball_x = BALL_R;
 		vx = fabsf(vx);
+		gamesound_play(SND_TICK);
 	} else if (ball_x > field_w - BALL_R) {
 		ball_x = (float)(field_w - BALL_R);
 		vx = -fabsf(vx);
+		gamesound_play(SND_TICK);
 	}
 	if (ball_y < BALL_R) {
 		ball_y = BALL_R;
 		vy = fabsf(vy);
+		gamesound_play(SND_TICK);
 	}
 
 	// The paddle: where on it the ball lands sets the angle it leaves at.
@@ -325,6 +317,7 @@ static void step(float dt) {
 		vx = speed * sinf(angle);
 		vy = -speed * cosf(angle);
 		ball_y = py - BALL_R;
+		gamesound_play(SND_HIT);
 	}
 
 	hit_bricks(prev_x, prev_y);
@@ -338,7 +331,8 @@ static void step(float dt) {
 		new_wall();
 		serve_ready();
 		redraw_all();
-		show_message("game_tap_serve", NULL);
+		gamesound_play(SND_WIN);
+		gk_ui_message(&ui, tr("game_tap_serve"), 60);
 		return;
 	}
 	if (ball_y - BALL_R > field_h) {
@@ -348,7 +342,7 @@ static void step(float dt) {
 
 static void tick_cb(lv_timer_t *timer) {
 	(void)timer;
-	if (state != ST_PLAY) {
+	if (state != ST_PLAY || ui.paused) {
 		return;
 	}
 	uint32_t now = lv_tick_get();
@@ -457,7 +451,8 @@ static void screen_loaded_cb(lv_event_t *e) {
 	}
 	lv_obj_move_background(canvas.image);
 
-	best = (int)config_get_int("breakout", "best", 0);
+	best = (int)highscore_get("breakout");
+	gamesound_open();
 	srand((unsigned)time(NULL));
 	tick_timer = lv_timer_create(tick_cb, TICK_MS, NULL);
 	new_game();
@@ -471,8 +466,24 @@ static void screen_unloaded_cb(lv_event_t *e) {
 		tick_timer = NULL;
 	}
 	gamecanvas_destroy(&canvas);
-	lv_obj_set_hidden(message, true);
+	gamesound_close();
+	gk_ui_reset(&ui);
 	power_hold_screen_on(false);
+}
+
+// The pause menu: the ball stands still while it is up, and picks up where it was.
+static void pause_cb(bool paused, void *user) {
+	(void)user;
+	if (!paused) {
+		last_tick = lv_tick_get();
+	}
+}
+
+static void restart_cb(void *user) {
+	(void)user;
+	if (canvas.px) {
+		new_game();
+	}
 }
 
 void breakout_init(gui_config_t *cfg) {
@@ -487,37 +498,7 @@ void breakout_init(gui_config_t *cfg) {
 	col_row[4] = gc_rgb(70, 150, 230);
 	col_row[5] = gc_rgb(150, 100, 220);
 
-	lv_obj_add_style(breakout_screen, &theme_style_screen, 0);
-	lv_obj_set_scrollable(breakout_screen, false);
-	lv_obj_t *title = settingsrow_title(breakout_screen, cfg, "breakout");
-	settingsrow_title_corner_slots(title, cfg, 3);
-
-	score_label = lv_label_create(breakout_screen);
-	lv_obj_add_style(score_label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(score_label, &font_ui_22, 0);
-	lv_obj_set_style_text_align(score_label, LV_TEXT_ALIGN_RIGHT, 0);
-	lv_obj_set_width(score_label, 260);
-	lv_obj_align(score_label, LV_ALIGN_TOP_RIGHT, -(int)cfg->padding, (int)cfg->top_bar_height + (int)cfg->padding + 4);
-	lv_label_set_text(score_label, "");
-
-	lives_label = lv_label_create(breakout_screen);
-	lv_obj_add_style(lives_label, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(lives_label, &font_ui_20, 0);
-	lv_obj_set_style_text_align(lives_label, LV_TEXT_ALIGN_RIGHT, 0);
-	lv_obj_set_width(lives_label, 260);
-	lv_obj_align(lives_label, LV_ALIGN_TOP_RIGHT, -(int)cfg->padding, (int)cfg->top_bar_height + (int)cfg->padding + 32);
-	lv_label_set_text(lives_label, "");
-
-	message = lv_label_create(breakout_screen);
-	lv_obj_set_style_text_font(message, &font_ui_32, 0);
-	lv_obj_set_style_text_color(message, lv_color_white(), 0);
-	lv_obj_set_style_text_align(message, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_bg_color(message, lv_color_black(), 0);
-	lv_obj_set_style_bg_opa(message, LV_OPA_60, 0);
-	lv_obj_set_style_pad_all(message, 18, 0);
-	lv_obj_set_style_radius(message, 16, 0);
-	lv_obj_set_clickable(message, false);
-	lv_obj_set_hidden(message, true);
+	gk_ui_build(&ui, breakout_screen, cfg, "breakout", pause_cb, restart_cb, NULL);
 
 	lv_obj_add_event_cb(breakout_screen, pressed_cb, LV_EVENT_PRESSED, NULL);
 	lv_obj_add_event_cb(breakout_screen, pressing_cb, LV_EVENT_PRESSING, NULL);
