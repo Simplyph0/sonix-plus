@@ -77,6 +77,50 @@ The card is FAT, but it is mounted with the execute bits on, so a copied program
 runs as it is. Programs that draw the whole screen and read single keys (vi, top)
 do not work yet: the Terminal sends a line at a time.
 
+## Games, emulators and apps
+
+**More** holds two folders: **Games** and **Emulators**. Both also list apps from the card.
+
+**Games** (built in): Flappy Bird, Snake (swipe to steer), 2048 (swipe to slide) and Breakout
+(slide a finger to move the paddle, tap to serve). Each keeps its best score.
+
+**Emulators**: the Game Boy is built in (ROMs in `Games/GB` and `Games/GBC`). NES, GBA and SNES
+are apps you copy to the card:
+
+| App | Games go in | Get it |
+| --- | --- | --- |
+| [NES](https://github.com/Simplyph0/sonix-app-nes) | `Games/NES` | build it, or take the release |
+| [GBA](https://github.com/Simplyph0/sonix-app-gba) | `Games/GBA` | build it, or take the release |
+| [SNES](https://github.com/Simplyph0/sonix-app-snes) | `Games/SNES` | build it yourself: Snes9x is non-commercial, so no program is offered |
+
+1. Open **More > Games** or **More > Emulators** once with a card in. The player makes
+   `Apps/` on the card.
+2. Copy an app's folder (for example `NES`) into `Apps/`. Delete the folder to remove it.
+3. Copy your games into the folder named above. The player makes the folder when you
+   first open the app, so you can see where to put them.
+4. Open the app and tap a game. The emulator shows the game on top and a pad below it.
+   **SAVE** and **LOAD** keep one save state per game, and **EXIT** (hold it for a moment)
+   leaves. Battery saves go to `Saves/<system>/` on the card.
+
+Apps run as root, so install only ones you trust. If an emulator crashes the screen, hold the
+power button.
+
+**Writing an app**: an app is a folder with a `manifest.ini`, an icon and a MIPS program.
+[APPS.md](APPS.md) has the format and everything the player gives an app, and
+[sonix-app-sdk](https://github.com/Simplyph0/sonix-app-sdk) has the header for screen, touch and
+sound, a libretro frontend, and examples.
+
+**Building apps from source**: each app repo has a Makefile. With the MIPS toolchain that
+`make target` builds (see [Building for the device](#building-for-the-device)):
+
+```bash
+make fetch
+make package CROSS=/path/to/sonix-player/rockbox-toolchain/bin/mipsel-rockbox-linux-gnu-
+```
+
+That makes `dist/<Name>/`, ready to copy to `Apps/`. `make host` builds one for your computer, and
+`python3 tools/mkrom.py` in each emulator repo writes a small test ROM.
+
 ## Install
 
 1. Download the firmware for your player from the
