@@ -4,18 +4,12 @@ What changed in each release of this fork, newest first. The release page shows
 the section for its own tag, so write the section here before pushing the tag
 (see `.github/workflows/release-firmware.yml`).
 
-## Unreleased
+## v1.4 - 2026-10-27
 
-- **Games** folder in More: Flappy Bird (moved here), **Snake**, **2048** and **Breakout**.
-- **Emulators** folder in More: the Game Boy (moved here).
-- **Apps from the card**: programs in `Apps/<name>/` with a `manifest.ini` appear as
-  tiles in More, Games or Emulators and are given the screen, the touch panel and the
-  sound while they run ([APPS.md](APPS.md)). Apps that open files get a list of the
-  files in the folder they name.
-- **Updates from this repository**: the player's "Via internet" update now reads `Simplyph0/sonix-plus`, and
-  the release workflow writes the tag into the images as `OS_version`.
-- **NES, GBA and SNES** as apps from the card, each in a repository of its own, on a
-  shared libretro frontend ([sonix-app-sdk](https://github.com/Simplyph0/sonix-app-sdk)).
+- **Games** and **Emulators** folders in More: Flappy Bird, **Snake**, **2048** and **Breakout**, and the Game Boy.
+- **Apps from the card**: programs in `Apps/<name>/` appear as tiles and get the screen, touch and sound
+  ([APPS.md](APPS.md)). NES, GBA and SNES are apps, in their own repositories.
+- **Updates** now come from this repository, and each release carries its tag as `OS_version`.
 
 ## v1.0 - 2026-10-24
 
