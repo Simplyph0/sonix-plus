@@ -1,0 +1,27 @@
+#!/bin/sh
+# fastfetch, with its settings where they can be edited: on the card, in
+# Terminal/fastfetch/ (config.jsonc and sonix.txt, the logo). They are copied there
+# from /usr/share/sonix/fastfetch the first time, and never overwritten after, so
+# what is on the card is yours. Without a writable card the defaults are used as
+# they are. An option of your own (-c, --config) is left alone.
+
+SHARE=/usr/share/sonix/fastfetch
+CARD=/mnt/sd_0
+DIR=$CARD/Terminal/fastfetch
+
+for arg in "$@"; do
+	case "$arg" in
+		-c|--config|--config=*) exec /usr/lib/sonix/fastfetch "$@" ;;
+	esac
+done
+
+if [ -d "$CARD" ] && [ -w "$CARD" ] && mkdir -p "$DIR" 2>/dev/null; then
+	[ -f "$DIR/sonix.txt" ] || cp "$SHARE/sonix.txt" "$DIR/sonix.txt"
+	[ -f "$DIR/config.jsonc" ] || sed "s|@DIR@|$DIR|" "$SHARE/config.jsonc" > "$DIR/config.jsonc"
+	CONFIG=$DIR/config.jsonc
+else
+	CONFIG=/tmp/sonix-fastfetch.jsonc
+	sed "s|@DIR@|$SHARE|" "$SHARE/config.jsonc" > "$CONFIG"
+fi
+
+exec /usr/lib/sonix/fastfetch -c "$CONFIG" "$@"

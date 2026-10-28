@@ -57,6 +57,8 @@ static int boom_x;
 static int boom_y;
 static bool flag_mode;
 static uint32_t clock_ms;
+static int armed_button = -1; // a running game asks twice before NEW or the level starts it over
+static uint32_t armed_until;
 static int shown_seconds;
 static bool new_best;
 static uint32_t final_ms;
@@ -164,7 +166,7 @@ static void draw_button(int i, bool pressed) {
 	char text[24];
 	switch (i) {
 	case BTN_LEVEL:
-		snprintf(text, sizeof(text), "%s", BAR_LEVEL[level]);
+		snprintf(text, sizeof(text), "%s", armed_button == i ? "SURE?" : BAR_LEVEL[level]);
 		break;
 	case BTN_MODE:
 		snprintf(text, sizeof(text), "%s", flag_mode ? "FLAG" : "DIG");
@@ -173,8 +175,11 @@ static void draw_button(int i, bool pressed) {
 		}
 		break;
 	default:
-		snprintf(text, sizeof(text), "NEW");
+		snprintf(text, sizeof(text), "%s", armed_button == i ? "SURE?" : "NEW");
 		break;
+	}
+	if (armed_button == i) {
+		fill = gc_rgb(200, 70, 60);
 	}
 	gamecanvas_rect(c, x - 2, y - 2, w + 4, BAR_H + 4, col_bg);
 	gamecanvas_round_rect(c, x, y, w, BAR_H, 20, fill);
@@ -238,6 +243,7 @@ static void layout(void) {
 }
 
 static void new_game(void) {
+	armed_button = -1;
 	layout();
 	memset(is_mine, 0, sizeof(is_mine));
 	memset(near_count, 0, sizeof(near_count));
@@ -457,7 +463,26 @@ static int button_at(int x, int y) {
 	return -1;
 }
 
+static void disarm(void) {
+	int was = armed_button;
+	armed_button = -1;
+	if (was >= 0) {
+		draw_button(was, false);
+	}
+}
+
 static void press_button_action(int b) {
+	if (b != BTN_LEVEL && b != BTN_NEW) {
+		disarm();
+	} else if (state == ST_PLAY && armed_button != b) {
+		disarm();
+		armed_button = b;
+		armed_until = clock_ms + 2500;
+		gamesound_play(SND_BLIP);
+		draw_button(b, false);
+		return;
+	}
+	armed_button = -1;
 	if (b == BTN_LEVEL) {
 		level = (level + 1) % 3;
 		config_set_int("games", "mines_level", level);
@@ -509,6 +534,7 @@ static void touch(gk_game_t *g, gk_phase_t phase, int x, int y) {
 		press_button_action(press_button);
 		return;
 	}
+	disarm(); // a tap on the board takes the question back
 	if (state == ST_WON || state == ST_LOST) {
 		if (clock_ms - end_at > 700) {
 			new_game();
@@ -532,6 +558,9 @@ static void touch(gk_game_t *g, gk_phase_t phase, int x, int y) {
 static void tick(gk_game_t *g, uint32_t dt) {
 	(void)g;
 	clock_ms += dt;
+	if (armed_button >= 0 && clock_ms >= armed_until) {
+		disarm();
+	}
 	if (state != ST_PLAY) {
 		return; // won or lost: the clock runs on, only to time the tap that starts again
 	}

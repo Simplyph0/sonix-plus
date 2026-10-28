@@ -8,7 +8,7 @@ Everything the player can do is in **[FEATURES.md](FEATURES.md)**, what changed 
 [CHANGELOG.md](CHANGELOG.md), and how to build it is in [BUILDING.md](BUILDING.md).
 
 > **AI disclaimer.** I wrote what I added to this fork (the Calculator, the Terminal, Subsonic, lyrics on
-> streamed tracks, the Games and Emulators folders and ten games, covers, pause menus and sounds, apps from the card with their SDK and the NES, GBA and
+> streamed tracks, the Games and Emulators folders and ten games, covers, pause menus and sounds, fastfetch, apps from the card with their SDK and the NES, GBA and
 > SNES apps, and the release workflow) with the help of an AI coding assistant, Claude by Anthropic. They
 > build, and I have run parts of them on a computer, but they have had far less testing on real players than
 > the rest of Sonix Player. Flash at your own risk, and keep HiBy's original firmware so you can go back.
@@ -21,7 +21,8 @@ Everything the player can do is in **[FEATURES.md](FEATURES.md)**, what changed 
   it and from an ADB shell.
 - **Games** in More: Flappy Bird, Snake, 2048, Breakout, Blocks, Mines, Rally, Sudoku, Words and Tic-Tac-Toe,
   each with a pause menu, sound effects and a best score kept on the card. **Emulators** next to it: the Game
-  Boy, and **apps from the card**, such as NES, GBA and SNES, with covers for your games and an FPS counter.
+  Boy, and **apps from the card**, such as NES, GBA and SNES, with covers for your games and a MENU key (FPS counter, sound, frame skip).
+- **fastfetch** in the Terminal, with a SonixOS logo and settings you edit on the card.
 - **Subsonic** under Streaming: all your songs kept on the card, with server stars and play reporting.
 - **Lyrics on streamed tracks**, from the lyrics in the file.
 - **Firmware builds on GitHub**: a workflow that builds both images and publishes them as a release.
@@ -66,7 +67,7 @@ sound while they run. [APPS-LIST.md](APPS-LIST.md) lists the ones that exist.
 2. Copy an app's folder (for example `NES`) into `Apps/`. Delete the folder to remove it.
 3. Put games in the folder named above. The player makes it when you first open the app.
 4. Open the app and tap a game: the game is on top and a pad below. **SAVE** and **LOAD** keep one state per
-   game, **EXIT** (tap it twice) leaves, a tap on the picture shows the FPS counter, and battery saves go to
+   game, **MENU** has the FPS counter, sound on or off and frame skip, **EXIT** (tap it twice) leaves, and battery saves go to
    `Saves/<system>/` on the card.
 5. A picture with the same name as a game, in the same folder (`Tetris.gb` and `Tetris.png`), is its **cover** in the
    list, and a name loses what is in brackets: `Pokemon - Gold Version (USA, Europe)` reads `Pokemon - Gold Version`.
@@ -83,7 +84,11 @@ The player's filesystem is read-only, so programs for the Terminal (and `adb she
 1. Tap "Build number" five times in Settings > System > About, open Developer options and switch on
    **Terminal binaries**. That makes `Terminal/bin` (programs), `Terminal/lib` (their shared libraries) and an
    optional `Terminal/font.ttf` on the card.
-2. Copy a program into `bin`. It is first on the PATH, so a file called `fastfetch` starts when you type it.
+2. Copy a program into `bin`. It is first on the PATH, so a file called `mytool` starts when you type it.
+
+**fastfetch** is already in the firmware, as **SonixOS** (the image has an `/etc/os-release`): type `fastfetch`.
+Its settings are on the card, in `Terminal/fastfetch/` (`config.jsonc`, and `sonix.txt`, the logo), copied there
+the first time and never overwritten, so edit them there. Delete a file to get the default back.
 
 A program has to be **32-bit little-endian MIPS (mipsel, MIPS32r2)**, linked statically or against **glibc 2.22
 or older**. The toolchain from `make target` makes them:

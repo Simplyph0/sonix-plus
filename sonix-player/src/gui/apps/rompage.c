@@ -160,11 +160,16 @@ void rompage_open(const app_t *app) {
 		lv_obj_add_event_cb(row, row_free_cb, LV_EVENT_DELETE, path);
 	}
 
+	// The rows have their own copies of what they need; the list (450 kB at its largest) goes.
+	free(roms);
+	roms = NULL;
+	rom_count = 0;
+
 	switch_screen(rompage_screen);
 }
 
 // The pictures go when the page does (they stay while a game runs from it: sixty of them
-// are a megabyte and a half).
+// are three quarters of a megabyte).
 static void unloaded_cb(lv_event_t *e) {
 	(void)e;
 	lv_obj_clean(container); // the rows that show them go first

@@ -220,4 +220,5 @@ More holds two folders, **Games** and **Emulators**, with the rest of its tiles 
 - **Firmware update** - over the internet with the full list of changes, or from a `.upt` file on the card.
 - **About** - device, serial number, card space and version.
 - **Factory reset** - settings, Wi-Fi networks and Bluetooth devices are erased. The music on the card is not touched.
+- **fastfetch** - in the firmware, run as `fastfetch` in the Terminal or an ADB shell. The image identifies itself as SonixOS (`/etc/os-release`, with the release's version). Its `config.jsonc` and logo `sonix.txt` are in `Terminal/fastfetch/` on the card, made the first time and never overwritten.
 - **Developer options** - tap "Build number" five times in About: ADB, log to the microSD, database log, Bluetooth log, Terminal binaries, and running processes and memory.

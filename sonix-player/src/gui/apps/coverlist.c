@@ -129,6 +129,29 @@ void coverlist_begin(void) {
 	}
 }
 
+// The picture as the screen holds it: 16 bits a pixel, half of what the loader returns, kept for as
+// long as the list is open. Anything see-through is laid on the colour of the box behind it.
+static uint8_t *load_rgb565(const char *path) {
+	uint8_t *argb = apps_load_image(path, COVER_SIZE);
+	if (!argb) {
+		return NULL;
+	}
+	uint16_t *out = malloc((size_t)COVER_SIZE * COVER_SIZE * sizeof(uint16_t));
+	if (out) {
+		lv_color_t bg = theme()->surface_pressed;
+		for (int i = 0; i < COVER_SIZE * COVER_SIZE; i++) {
+			const uint8_t *s = argb + i * 4; // blue, green, red, alpha
+			unsigned a = s[3];
+			unsigned b = (s[0] * a + bg.blue * (255 - a)) / 255;
+			unsigned g = (s[1] * a + bg.green * (255 - a)) / 255;
+			unsigned r = (s[2] * a + bg.red * (255 - a)) / 255;
+			out[i] = (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+		}
+	}
+	free(argb);
+	return (uint8_t *)out;
+}
+
 // One picture a tick, in the order the rows were added: the top of the list fills in first.
 static void tick_cb(lv_timer_t *t) {
 	if (next_cover >= cover_count) {
@@ -139,16 +162,16 @@ static void tick_cb(lv_timer_t *t) {
 	if (!c->box) {
 		return;
 	}
-	c->pixels = apps_load_image(c->path, COVER_SIZE);
+	c->pixels = load_rgb565(c->path);
 	if (!c->pixels) {
 		return;
 	}
 	c->dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
-	c->dsc.header.cf = LV_COLOR_FORMAT_ARGB8888;
+	c->dsc.header.cf = LV_COLOR_FORMAT_RGB565;
 	c->dsc.header.w = COVER_SIZE;
 	c->dsc.header.h = COVER_SIZE;
-	c->dsc.header.stride = COVER_SIZE * 4;
-	c->dsc.data_size = COVER_SIZE * COVER_SIZE * 4;
+	c->dsc.header.stride = COVER_SIZE * 2;
+	c->dsc.data_size = COVER_SIZE * COVER_SIZE * 2;
 	c->dsc.data = c->pixels;
 
 	lv_obj_clean(c->box); // the letter goes

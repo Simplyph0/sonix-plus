@@ -653,6 +653,15 @@ build_one() {
 		sed_file "s/($VERSION_KEY[[:space:]]*:[[:space:]]*\")[^\"]*(\")/\\1$VERSION_VALUE\\2/" "$JSON"
 		grep -q "$VERSION_KEY[[:space:]]*:[[:space:]]*\"$VERSION_VALUE\"" "$JSON" || die "$VERSION_KEY was not rewritten."
 		say "    $VERSION_KEY = $VERSION_VALUE"
+
+		# The same version where Linux tools look for it (fastfetch, uname-style scripts).
+		OS_RELEASE="$SQUASH_DIR/etc/os-release"
+		if [ -f "$OS_RELEASE" ]; then
+			sed_file "s/^(PRETTY_NAME=\"SonixOS )[^\"]*(\")/\1$VERSION_VALUE\2/" "$OS_RELEASE"
+			sed_file "s/^(VERSION_ID=\")[^\"]*(\")/\1$VERSION_VALUE\2/" "$OS_RELEASE"
+			sed_file "s/^(VERSION=\")[^\"]*(\")/\1$VERSION_VALUE\2/" "$OS_RELEASE"
+			say "    /etc/os-release = SonixOS $VERSION_VALUE"
+		fi
 	fi
 	say ""
 

@@ -13,7 +13,7 @@
 //
 // The pictures are decoded one at a time, a few milliseconds apart, so a list of a hundred
 // games opens at once and fills in from the top. At most COVERLIST_MAX of them are kept,
-// 25 kB each; the rest of the games keep their letter.
+// 12 kB each; the rest of the games keep their letter.
 //
 // A list that has no cover anywhere is better built with plain rows (settingsrow_action),
 // so that is what coverlist_has_cover() is for.

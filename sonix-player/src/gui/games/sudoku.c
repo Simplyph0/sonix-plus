@@ -45,6 +45,7 @@ static int8_t solution[N];
 static uint16_t notes[N]; // bit d-1: the pencil mark d
 static int sel = -1;
 static bool notes_mode;
+static uint32_t level_armed_until; // a running game asks twice before the level changes and it starts over
 static int hints;
 static uint32_t clock_ms;
 static uint32_t end_ms;
@@ -350,7 +351,10 @@ static void draw_controls(void) {
 			snprintf(text, sizeof(text), "HINT");
 			break;
 		default:
-			snprintf(text, sizeof(text), "%s", BAR_LEVEL[level]);
+			snprintf(text, sizeof(text), "%s", level_armed_until ? "SURE?" : BAR_LEVEL[level]);
+			if (level_armed_until) {
+				fill = col_button_on;
+			}
 			break;
 		}
 		gamecanvas_round_rect(c, tool_x(i), tool_y, tool_w(), BTN_H, 20, fill);
@@ -408,6 +412,7 @@ static void start_message(void) {
 // ---------------------------------------------------------------------------
 
 static void ready(void) {
+	level_armed_until = 0;
 	state = ST_READY;
 	sel = -1;
 	hints = 0;
@@ -544,6 +549,8 @@ static void tap(int x, int y) {
 		}
 		return;
 	}
+	bool was_armed = level_armed_until != 0;
+	level_armed_until = 0; // any other tap takes the question back
 	// the bars at the bottom
 	if (y >= tool_y - 4 && y < tool_y + BTN_H + 4) {
 		for (int i = 0; i < 4; i++) {
@@ -561,6 +568,12 @@ static void tap(int x, int y) {
 					hint();
 					break;
 				default:
+					if (state == ST_PLAY && !was_armed) {
+						level_armed_until = clock_ms + 2500;
+						gamesound_play(SND_BLIP);
+						draw_controls();
+						break;
+					}
 					level = (level + 1) % 3;
 					config_set_int("games", "sudoku_level", level);
 					config_save();
@@ -568,10 +581,19 @@ static void tap(int x, int y) {
 					ready();
 					break;
 				}
+				if (was_armed && i != 3) {
+					draw_controls();
+				}
 				return;
 			}
 		}
+		if (was_armed) {
+			draw_controls();
+		}
 		return;
+	}
+	if (was_armed) {
+		draw_controls();
 	}
 	if (y >= pad_y - 4 && y < pad_y + BTN_H + 4) {
 		for (int d = 1; d <= 9; d++) {
@@ -612,6 +634,10 @@ static void touch_cb(gk_game_t *g, gk_phase_t phase, int x, int y) {
 static void tick(gk_game_t *g, uint32_t dt) {
 	(void)g;
 	clock_ms += dt;
+	if (level_armed_until && clock_ms >= level_armed_until) {
+		level_armed_until = 0;
+		draw_controls();
+	}
 	if (state != ST_PLAY) {
 		return; // the clock runs on once it is over, only to time the tap that starts again
 	}

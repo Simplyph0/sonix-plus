@@ -4,6 +4,13 @@ What changed in each release of this fork, newest first. The release page shows
 the section for its own tag, so write the section here before pushing the tag
 (see `.github/workflows/release-firmware.yml`).
 
+## v1.7 - 2026-10-27
+
+- **fastfetch** is in the firmware, with a SonixOS logo; the image now identifies itself as **SonixOS** (`/etc/os-release`). Its settings are on the card, in `Terminal/fastfetch/`.
+- **NES, GBA and SNES apps** get a **MENU** key: FPS counter, sound on or off and frame skip, kept per system.
+- Sudoku and Mines ask "SURE?" before the level or NEW button throws away a game in progress.
+- Less memory: covers use half the RAM and the emulator game list is freed once shown.
+
 ## v1.6 - 2026-10-27
 
 - Six new **Games**: Blocks, Mines, Rally, Sudoku, Words (offline word list) and Tic-Tac-Toe (three levels).

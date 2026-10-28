@@ -1,0 +1,7 @@
+NAME="SonixOS"
+PRETTY_NAME="SonixOS 1.3.0"
+ID=sonixos
+VERSION_ID="1.3.0"
+VERSION="1.3.0"
+ANSI_COLOR="38;2;47;128;237"
+HOME_URL="https://github.com/Simplyph0/sonix-plus"

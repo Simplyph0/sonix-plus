@@ -21,6 +21,7 @@ static entry_t entries[MAX_ENTRIES];
 static int entry_count;
 static bool loaded;
 static bool loaded_from_card;
+static bool card_was_usable; // the card as the last load found it
 
 static const char *root_of(void) { return root_ptr && *root_ptr ? *root_ptr : ""; }
 
@@ -43,6 +44,7 @@ static void load(void) {
 	entry_count = 0;
 	loaded = true;
 	loaded_from_card = false;
+	card_was_usable = card_usable();
 	if (!root_of()[0] || !storage_card_attached()) {
 		return;
 	}
@@ -108,7 +110,7 @@ void highscore_init(const char *const *sd_root) {
 }
 
 long highscore_get(const char *name) {
-	if (!loaded || (!loaded_from_card && card_usable())) {
+	if (!loaded || (!loaded_from_card && !card_was_usable && card_usable())) {
 		load(); // a card that came in after the player started is picked up here
 	}
 	entry_t *e = find(name);
